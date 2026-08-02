@@ -94,16 +94,22 @@ def send_telegram_message(text: str, *, chat_id: str | None = None) -> int:
     target_chat_id = require_chat_id(chat_id)
     sent = 0
     for chunk in split_message(text):
-        response = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={
-                "chat_id": target_chat_id,
-                "text": chunk,
-                "disable_web_page_preview": True,
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
+        try:
+            response = requests.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={
+                    "chat_id": target_chat_id,
+                    "text": chunk,
+                    "disable_web_page_preview": True,
+                },
+                timeout=30,
+            )
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            detail = response.text if "response" in locals() else str(exc)
+            raise HTTPException(status_code=502, detail=f"Telegram sendMessage failed: {detail}") from exc
+        except requests.RequestException as exc:
+            raise HTTPException(status_code=502, detail=f"Telegram sendMessage connection failed: {exc}") from exc
         sent += 1
     return sent
 
@@ -120,18 +126,31 @@ def register_telegram_webhook() -> dict[str, Any]:
     if settings.webhook_secret_token:
         payload["secret_token"] = settings.webhook_secret_token
 
-    response = requests.post(
-        f"https://api.telegram.org/bot{token}/setWebhook",
-        json=payload,
-        timeout=30,
-    )
-    response.raise_for_status()
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{token}/setWebhook",
+            json=payload,
+            timeout=30,
+        )
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        detail = response.text if "response" in locals() else str(exc)
+        raise HTTPException(status_code=502, detail=f"Telegram setWebhook failed: {detail}") from exc
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Telegram setWebhook connection failed: {exc}") from exc
     return response.json()
 
 
 def fetch_json(path: str) -> dict[str, Any]:
-    response = requests.get(f"{settings.market_api_base_url}{path}", timeout=30)
-    response.raise_for_status()
+    url = f"{settings.market_api_base_url}{path}"
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        detail = response.text if "response" in locals() else str(exc)
+        raise HTTPException(status_code=502, detail=f"Market API request failed for {url}: {detail}") from exc
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Market API connection failed for {url}: {exc}") from exc
     return response.json()
 
 
@@ -378,6 +397,21 @@ def health() -> HealthResponse:
         report_url_configured=bool(settings.report_url),
         market_api_base_url=settings.market_api_base_url,
     )
+
+
+@app.get("/debug/config", response_model=dict[str, Any])
+def debug_config() -> dict[str, Any]:
+    return {
+        "tg_token_configured": bool(settings.tg_token),
+        "tg_chat_id_configured": bool(settings.tg_chat_id),
+        "tg_chat_id_looks_numeric": bool(settings.tg_chat_id and str(settings.tg_chat_id).lstrip("-").isdigit()),
+        "tg_username_configured": bool(settings.tg_username),
+        "webhook_secret_configured": bool(settings.webhook_secret),
+        "webhook_secret_token_configured": bool(settings.webhook_secret_token),
+        "render_base_url": settings.render_base_url,
+        "market_api_base_url": settings.market_api_base_url,
+        "report_url_configured": bool(settings.report_url),
+    }
 
 
 @app.post("/telegram/set-webhook/{secret}", response_model=BotResponse)
