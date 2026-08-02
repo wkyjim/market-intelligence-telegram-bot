@@ -1,0 +1,50 @@
+name: Telegram Reports
+
+on:
+  schedule:
+    # 06:00 HKT = 22:00 UTC previous day
+    - cron: "0 22 * * *"
+    # 18:00 HKT = 10:00 UTC
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+    inputs:
+      report_type:
+        description: Report to send
+        required: true
+        default: morning
+        type: choice
+        options:
+          - morning
+          - eod
+          - report-update
+
+env:
+  SERVICE_BASE_URL: https://market-intelligence-telegram-bot.onrender.com
+
+jobs:
+  send-telegram-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Select scheduled report type
+        id: select
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "report_type=${{ inputs.report_type }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 22 * * *" ]; then
+            echo "report_type=morning" >> "$GITHUB_OUTPUT"
+          else
+            echo "report_type=eod" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Send Telegram report
+        shell: bash
+        env:
+          TG_WEBHOOK_SECRET: ${{ secrets.TG_WEBHOOK_SECRET }}
+          REPORT_TYPE: ${{ steps.select.outputs.report_type }}
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --retry 2 --retry-delay 5 --max-time 120 \
+            -X POST \
+            -H "X-Telegram-Bot-Api-Secret-Token: ${TG_WEBHOOK_SECRET}" \
+            "${SERVICE_BASE_URL}/tasks/send/${REPORT_TYPE}/${TG_WEBHOOK_SECRET}"

@@ -1,185 +1,233 @@
 # Market Intelligence Telegram Bot
 
-Standalone FastAPI webhook service for the Market Intelligence Telegram bot.
+Standalone FastAPI webhook service for market intelligence Telegram commands, scheduled reports, report-update notifications, and system alerts.
 
-It connects:
-
-1. FastAPI webhook app
-2. GitHub repository
-3. Render Web Service
-4. Telegram Bot webhook
-
-The bot does not store secrets in code. Configure credentials in Render environment variables.
-
-## Files
+Production URL:
 
 ```text
-market-intelligence-telegram-bot/
-├── main.py
-├── requirements.txt
-├── .env
-├── .gitignore
-└── README.md
+https://market-intelligence-telegram-bot.onrender.com
 ```
+
+## Security Model
+
+The project uses one shared secret:
+
+```text
+TG_WEBHOOK_SECRET
+```
+
+The same secret is required in both places for every protected endpoint:
+
+- URL path: `/.../{secret}`
+- Header: `X-Telegram-Bot-Api-Secret-Token`
+
+Do not commit `.env`, Telegram tokens, chat IDs, or shared secrets.
+
+## Required Render Environment Variables
+
+```text
+TG_TOKEN=
+TG_CHAT_ID=
+TG_USERNAME=Ai_market_monitor_bot
+TG_WEBHOOK_SECRET=
+TG_RENDER_BASE_URL=https://market-intelligence-telegram-bot.onrender.com
+TG_REPORT_URL=https://wkyjim.github.io/market-dashboard/data/latest-report.md
+TG_DASHBOARD_URL=https://wkyjim.github.io/market-dashboard/#overview
+MARKET_API_BASE_URL=https://postgresql-us-equities-api.onrender.com
+REQUEST_TIMEOUT_SECONDS=30
+LOG_LEVEL=INFO
+```
+
+`TG_CHAT_ID` must be the numeric Telegram chat ID.
 
 ## Local Setup
 
-1. Create a Telegram bot using BotFather.
-2. Copy `.env` and fill local values.
-3. Install dependencies:
-
 ```bash
 pip install -r requirements.txt
-```
-
-4. Run locally:
-
-```bash
 uvicorn main:app --reload
 ```
 
-5. Check health:
+Health check:
 
 ```bash
-curl http://127.0.0.1:8000/
+curl http://127.0.0.1:8000/health
 ```
-
-Local Telegram webhook testing requires a public HTTPS tunnel such as ngrok or Cloudflare Tunnel.
-
-## Required Environment Variables
-
-Set these in Render:
-
-```text
-TG_token=<Telegram BotFather token>
-TG_chat_id=<your Telegram chat id>
-TG_username=<bot username, optional>
-TG_webhook_secret=<long random path secret>
-TG_RENDER_BASE_URL=https://<your-render-service>.onrender.com
-MARKET_API_BASE_URL=https://postgresql-us-equities-api.onrender.com
-TG_REPORT_URL=https://wkyjim.github.io/market-dashboard/data/latest-report.md
-```
-
-Recommended extra security:
-
-```text
-TG_webhook_secret_token=<long random Telegram secret token>
-```
-
-Do not commit real values.
-
-## GitHub Setup
-
-From inside this folder:
-
-```bash
-git init
-git add main.py requirements.txt .gitignore README.md
-git commit -m "Initial Telegram webhook bot"
-git branch -M main
-git remote add origin https://github.com/wkyjim/market-intelligence-telegram-bot.git
-git push -u origin main
-```
-
-`.env` is ignored and should not be pushed.
 
 ## Render Setup
 
-1. Create a new Render Web Service.
-2. Connect the GitHub repository.
-3. Runtime: Python.
-4. Build command:
+Create a Render Web Service from this repository.
+
+Build command:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-5. Start command:
+Start command:
 
 ```bash
 uvicorn main:app --host 0.0.0.0 --port $PORT
 ```
 
-6. Add the environment variables listed above.
-7. Deploy.
+Render free-tier warning: the service may cold start. Telegram and scheduled report requests can take longer immediately after idle periods.
 
 ## Register Telegram Webhook
 
-After Render is live, call:
+PowerShell one-line:
 
-```bash
-curl -X POST https://<your-render-service>.onrender.com/telegram/set-webhook/<TG_webhook_secret>
+```powershell
+Invoke-RestMethod -Method Post -Uri "https://market-intelligence-telegram-bot.onrender.com/telegram/set-webhook/<TG_WEBHOOK_SECRET>" -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>" }
 ```
 
-If using `TG_webhook_secret_token`, call:
+PowerShell multiline:
 
-```bash
-curl -X POST \
-  -H "X-Telegram-Bot-Api-Secret-Token: <TG_webhook_secret_token>" \
-  https://<your-render-service>.onrender.com/telegram/set-webhook/<TG_webhook_secret>
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri "https://market-intelligence-telegram-bot.onrender.com/telegram/set-webhook/<TG_WEBHOOK_SECRET>" `
+  -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>" }
 ```
 
-Telegram will send updates to:
+Telegram will call:
 
 ```text
-https://<your-render-service>.onrender.com/telegram/webhook/<TG_webhook_secret>
+https://market-intelligence-telegram-bot.onrender.com/telegram/webhook/<TG_WEBHOOK_SECRET>
 ```
 
 ## Telegram Commands
 
 ```text
-/start          Show available commands and features
-/market         Show the latest market snapshot
-/dashboard      Show the latest executive dashboard
-/report         Show the latest full market report
-/signals        Show latest deterministic setup signals
-/sectors        Show top and bottom sector scores
-/equity AAPL    Look up latest stock data and signals
-/macro          Show latest macro summary
-/risk           Show current market risk alerts
-/status         Show database, API, and data update status
+/start
+/market
+/dashboard
+/report
+/signals
+/sectors
+/equity AAPL
+/macro
+/risk
+/status
 ```
 
-## Scheduled Reports on Render
+Commands addressed to the bot, such as `/start@Ai_market_monitor_bot`, are normalized to `/start`.
 
-Use Render Cron Jobs to call protected task endpoints.
+## Test Task Endpoints in PowerShell
 
-Morning Positioning Report, daily 06:00 HKT:
+Morning report one-line:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "https://market-intelligence-telegram-bot.onrender.com/tasks/send/morning/<TG_WEBHOOK_SECRET>" -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>" }
+```
+
+End-of-day report one-line:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "https://market-intelligence-telegram-bot.onrender.com/tasks/send/eod/<TG_WEBHOOK_SECRET>" -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>" }
+```
+
+Report update one-line:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "https://market-intelligence-telegram-bot.onrender.com/tasks/send/report-update/<TG_WEBHOOK_SECRET>?force=true" -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>" }
+```
+
+System alert one-line:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "https://market-intelligence-telegram-bot.onrender.com/tasks/alert/<TG_WEBHOOK_SECRET>" -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>"; "Content-Type" = "application/json" } -Body '{"message":"Macro data update failed","source":"Macro ingestion","severity":"warning"}'
+```
+
+## GitHub Actions Scheduling
+
+Workflow:
+
+```text
+.github/workflows/telegram-reports.yml
+```
+
+GitHub Actions secret required:
+
+```text
+TG_WEBHOOK_SECRET
+```
+
+Schedule conversion:
+
+- Morning report: `0 22 * * *` UTC = 06:00 HKT
+- End-of-day report: `0 10 * * *` UTC = 18:00 HKT
+
+Manual run:
+
+1. Open GitHub Actions.
+2. Select `Telegram Reports`.
+3. Click `Run workflow`.
+4. Choose `morning`, `eod`, or `report-update`.
+
+## Report-Update Integration Example
+
+Call this only after `latest-report.md` has been generated and published.
+
+Reusable GitHub Actions step:
+
+```yaml
+- name: Notify Telegram report update
+  env:
+    TG_WEBHOOK_SECRET: ${{ secrets.TG_WEBHOOK_SECRET }}
+    SERVICE_BASE_URL: https://market-intelligence-telegram-bot.onrender.com
+  run: |
+    curl --fail-with-body --silent --show-error \
+      --retry 2 --retry-delay 5 --max-time 120 \
+      -X POST \
+      -H "X-Telegram-Bot-Api-Secret-Token: ${TG_WEBHOOK_SECRET}" \
+      "${SERVICE_BASE_URL}/tasks/send/report-update/${TG_WEBHOOK_SECRET}"
+```
+
+Do not trigger this before the published `TG_REPORT_URL` contains the new report.
+
+Report-update state is stored in a small local JSON file by default. On Render, this filesystem state may reset on redeployment or restart, so the next report-update call may send once again.
+
+## System-Alert Integration Examples
+
+Python:
+
+```python
+import os
+import requests
+
+secret = os.environ["TG_WEBHOOK_SECRET"]
+url = f"https://market-intelligence-telegram-bot.onrender.com/tasks/alert/{secret}"
+
+response = requests.post(
+    url,
+    headers={"X-Telegram-Bot-Api-Secret-Token": secret},
+    json={
+        "message": "Macro data update failed",
+        "source": "Macro ingestion",
+        "severity": "warning",
+    },
+    timeout=30,
+)
+response.raise_for_status()
+```
+
+GitHub Actions:
+
+```yaml
+- name: Send Telegram system alert
+  env:
+    TG_WEBHOOK_SECRET: ${{ secrets.TG_WEBHOOK_SECRET }}
+    SERVICE_BASE_URL: https://market-intelligence-telegram-bot.onrender.com
+  run: |
+    curl --fail-with-body --silent --show-error \
+      --retry 2 --retry-delay 5 --max-time 120 \
+      -X POST \
+      -H "X-Telegram-Bot-Api-Secret-Token: ${TG_WEBHOOK_SECRET}" \
+      -H "Content-Type: application/json" \
+      --data '{"message":"Macro data update failed","source":"Macro ingestion","severity":"warning"}' \
+      "${SERVICE_BASE_URL}/tasks/alert/${TG_WEBHOOK_SECRET}"
+```
+
+## Development Tests
 
 ```bash
-curl -X POST https://<your-render-service>.onrender.com/tasks/send/morning/<TG_webhook_secret>
+pytest
 ```
-
-End-of-Day Market Report, daily 18:00 HKT:
-
-```bash
-curl -X POST https://<your-render-service>.onrender.com/tasks/send/eod/<TG_webhook_secret>
-```
-
-Report update notification:
-
-```bash
-curl -X POST https://<your-render-service>.onrender.com/tasks/send/report-update/<TG_webhook_secret>
-```
-
-System alert:
-
-```bash
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -d "{\"message\":\"Macro data update failed\"}" \
-  https://<your-render-service>.onrender.com/tasks/alert/<TG_webhook_secret>
-```
-
-If using `TG_webhook_secret_token`, add:
-
-```bash
--H "X-Telegram-Bot-Api-Secret-Token: <TG_webhook_secret_token>"
-```
-
-## Notes
-
-- `/market`, `/macro`, and `/equity` use `MARKET_API_BASE_URL`.
-- `/dashboard`, `/report`, `/signals`, `/sectors`, and `/risk` use `TG_REPORT_URL`.
-- If `TG_REPORT_URL` is missing, `/dashboard` falls back to market tape and `/report` explains that report markdown is unavailable.
-- Long Telegram responses are split into safe message chunks.
