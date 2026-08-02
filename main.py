@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 import re
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+import httpx
 import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -33,6 +35,8 @@ class Settings:
 
 settings = Settings()
 app = FastAPI(title="Market Intelligence Telegram Bot", version="1.0.0")
+logger = logging.getLogger("market_intelligence_telegram_bot")
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 
 
 class HealthResponse(BaseModel):
@@ -111,6 +115,33 @@ def send_telegram_message(text: str, *, chat_id: str | None = None) -> int:
         except requests.RequestException as exc:
             raise HTTPException(status_code=502, detail=f"Telegram sendMessage connection failed: {exc}") from exc
         sent += 1
+    return sent
+
+
+async def async_send_telegram_message(text: str, *, chat_id: str | None = None) -> int:
+    token = require_tg_token()
+    target_chat_id = require_chat_id(chat_id)
+    sent = 0
+    async with httpx.AsyncClient(timeout=30) as client:
+        for chunk in split_message(text):
+            response = await client.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={
+                    "chat_id": target_chat_id,
+                    "text": chunk,
+                    "disable_web_page_preview": True,
+                },
+            )
+            logger.info(
+                "sendMessage status=%s body=%s",
+                response.status_code,
+                response.text,
+            )
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                raise HTTPException(status_code=502, detail=f"Telegram sendMessage failed: {response.text}") from exc
+            sent += 1
     return sent
 
 
@@ -351,7 +382,7 @@ Commands:
 def command_response(text: str) -> str:
     command_text = text.strip()
     command, _sep, arg_text = command_text.partition(" ")
-    command = command.lower()
+    command = command.lower().split("@")[0]
     markdown = fetch_report_markdown()
 
     if command == "/start":
@@ -399,6 +430,11 @@ def health() -> HealthResponse:
     )
 
 
+@app.get("/health", response_model=HealthResponse)
+def health_alias() -> HealthResponse:
+    return health()
+
+
 @app.get("/debug/config", response_model=dict[str, Any])
 def debug_config() -> dict[str, Any]:
     return {
@@ -429,18 +465,31 @@ async def telegram_webhook(
 ) -> BotResponse:
     verify_secret(secret, x_telegram_bot_api_secret_token)
     update = await request.json()
-    message = update.get("message") or update.get("edited_message") or {}
-    text = message.get("text")
+    logger.info("Full Telegram update: %s", update)
+
+    message = update.get("message") or update.get("edited_message")
+    if not message:
+        logger.info("No message object found")
+        return BotResponse(ok=True, handled=False, message="No message found.")
+
+    text = str(message.get("text") or "").strip()
     chat = message.get("chat") or {}
     chat_id = str(chat.get("id")) if chat.get("id") is not None else None
+    logger.info("Incoming chat_id=%s text=%r", chat_id, text)
 
     if not text or not chat_id:
         return BotResponse(ok=True, handled=False, message="No text command found.")
 
     if settings.tg_chat_id and chat_id != str(settings.tg_chat_id):
-        return BotResponse(ok=True, handled=False, message="Ignored unauthorized chat.")
+        logger.warning(
+            "Incoming chat_id=%s differs from configured TG_chat_id. Replying anyway while diagnostics are enabled.",
+            chat_id,
+        )
 
-    send_telegram_message(command_response(text), chat_id=chat_id)
+    command = text.split()[0].lower().split("@")[0]
+    reply = command_response(text)
+    logger.info("Parsed command=%s reply_length=%s", command, len(reply))
+    await async_send_telegram_message(reply, chat_id=chat_id)
     return BotResponse(ok=True, handled=True, message="Command handled.")
 
 
