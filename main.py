@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import hmac
 import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -95,6 +97,33 @@ class AlertRequest(BaseModel):
         return value.strip()
 
 
+@dataclass
+class ParsedReport:
+    title: str
+    timestamp: str | None
+    executive_summary: str | None
+    market_snapshot: dict[str, Any]
+    positioning: dict[str, Any]
+    sector_signals: list[dict[str, str]]
+    etf_flows: dict[str, Any]
+    news: list[dict[str, str]]
+    opportunities: list[str]
+    risks: list[str]
+    signal_changes: list[str]
+    raw_sections: dict[str, str]
+    markdown: str
+
+
+@dataclass
+class TelegramReply:
+    messages: list[str]
+    parse_mode: str | None = "HTML"
+    reply_markup: dict[str, Any] | None = None
+
+
+REPORT_CACHE: dict[str, Any] = {"expires_at": 0.0, "report": None}
+
+
 def require_env(value: str | None, name: str) -> str:
     if not value:
         raise HTTPException(status_code=500, detail=f"Required environment variable is missing: {name}")
@@ -136,7 +165,12 @@ def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
     return chunks
 
 
-async def send_telegram_message(chat_id: str, text: str, parse_mode: str | None = None) -> int:
+async def send_telegram_message(
+    chat_id: str,
+    text: str,
+    parse_mode: str | None = None,
+    reply_markup: dict[str, Any] | None = None,
+) -> int:
     token = require_env(settings.tg_token, "TG_TOKEN")
     sent = 0
     async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
@@ -148,6 +182,8 @@ async def send_telegram_message(chat_id: str, text: str, parse_mode: str | None 
             }
             if parse_mode:
                 payload["parse_mode"] = parse_mode
+            if reply_markup and sent == 0:
+                payload["reply_markup"] = reply_markup
             response = await client.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
             logger.info("Telegram sendMessage status=%s", response.status_code)
             try:
@@ -258,6 +294,407 @@ def markdown_table_rows(section: str) -> list[dict[str, str]]:
         if len(cells) == len(headers):
             parsed.append(dict(zip(headers, cells)))
     return parsed
+
+
+def escape_html(value: Any) -> str:
+    return html.escape("" if value is None else str(value), quote=False)
+
+
+def normalize_section_key(value: str) -> str:
+    value = re.sub(r"^#+\s*", "", value.strip().lower())
+    value = re.sub(r"[^a-z0-9\s]", " ", value)
+    value = re.sub(r"\bflows\b", "flow", value)
+    value = re.sub(r"\bheadlines\b", "headline", value)
+    value = re.sub(r"\brisks\b", "risk", value)
+    value = re.sub(r"\s+", " ", value)
+    return value.strip()
+
+
+def parse_markdown_sections(markdown: str) -> dict[str, str]:
+    lines = markdown.splitlines()
+    sections: dict[str, str] = {}
+    current_key: str | None = None
+    current_lines: list[str] = []
+    for line in lines:
+        match = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
+        if match:
+            if current_key:
+                sections[current_key] = "\n".join(current_lines).strip()
+            current_key = normalize_section_key(match.group(2))
+            current_lines = []
+            continue
+        if current_key:
+            current_lines.append(line)
+    if current_key:
+        sections[current_key] = "\n".join(current_lines).strip()
+    return sections
+
+
+def find_section(raw_sections: dict[str, str], aliases: list[str]) -> str:
+    alias_keys = [normalize_section_key(alias) for alias in aliases]
+    for alias in alias_keys:
+        if alias in raw_sections and raw_sections[alias].strip():
+            return raw_sections[alias]
+    for key, section in raw_sections.items():
+        if any(alias in key or key in alias for alias in alias_keys):
+            if section.strip():
+                return section
+    return ""
+
+
+ETF_FLOW_ALIASES = [
+    "ETF Flow",
+    "ETF Flows",
+    "Fund Flow",
+    "Fund Flows",
+    "ETF Fund Flow",
+    "ETF Flow Monitor",
+    "ETF Flows Analysis",
+    "Sector ETF Flow",
+    "Thematic ETF Flow",
+    "Core Flow Signals",
+    "Sector Flow Signals",
+    "Subsector PFV Signals",
+]
+
+
+NEWS_ALIASES = [
+    "News",
+    "Market News",
+    "Latest News",
+    "Headlines",
+    "Key Headlines",
+    "Catalysts",
+    "Market Catalysts",
+    "Macro News",
+    "Geopolitics",
+    "Earnings",
+    "Company News",
+    "News Analytics",
+    "Top Market-Moving Headlines",
+]
+
+
+def extract_executive_summary(report: ParsedReport) -> str | None:
+    return strip_markdown(
+        find_section(report.raw_sections, ["Executive Dashboard", "Executive Summary"])
+    ) or None
+
+
+def extract_market_snapshot(report: ParsedReport) -> dict[str, Any]:
+    section = find_section(report.raw_sections, ["Macro Snapshot", "Cross-Asset Confirmation", "Market Snapshot"])
+    return {"section": strip_markdown(section), "tables": markdown_table_rows(section)}
+
+
+def extract_positioning(report: ParsedReport) -> dict[str, Any]:
+    section = find_section(
+        report.raw_sections,
+        ["Tactical Positioning", "Positioning", "Risk Management", "Market Regime Score"],
+    )
+    return {"section": strip_markdown(section), "tables": markdown_table_rows(section)}
+
+
+def extract_sector_signals(report: ParsedReport) -> list[dict[str, str]]:
+    section = find_section(report.raw_sections, ["Official Sector Strength", "Sector Strength Ranking", "Sector Signals"])
+    return markdown_table_rows(section)
+
+
+def extract_etf_flows(report: ParsedReport) -> dict[str, Any]:
+    section = find_section(report.raw_sections, ETF_FLOW_ALIASES)
+    return {"section": strip_markdown(section), "tables": markdown_table_rows(section)}
+
+
+def section_items(section: str, *, limit: int = 10) -> list[str]:
+    clean = strip_markdown(section)
+    if not clean:
+        return []
+    lines = [line.strip(" -\t") for line in clean.splitlines() if line.strip()]
+    items: list[str] = []
+    buffer: list[str] = []
+    for line in lines:
+        if re.match(r"^(\d+[\.\)]\s+|[-*]\s+)", line) or (line and not line.startswith("|") and len(buffer) >= 3):
+            if buffer:
+                items.append(" ".join(buffer).strip())
+            buffer = [re.sub(r"^(\d+[\.\)]\s+|[-*]\s+)", "", line)]
+        else:
+            buffer.append(line)
+    if buffer:
+        items.append(" ".join(buffer).strip())
+    return [item for item in items if item][:limit]
+
+
+def extract_news(report: ParsedReport) -> list[dict[str, str]]:
+    section = find_section(report.raw_sections, NEWS_ALIASES)
+    table_rows = markdown_table_rows(section)
+    if table_rows:
+        items = []
+        for row in table_rows[:10]:
+            title = row.get("Headline") or row.get("Title") or row.get("News") or next(iter(row.values()), "")
+            summary = row.get("Why it matters") or row.get("Summary") or row.get("Market Impact") or ""
+            related = row.get("Affected Assets") or row.get("Related") or row.get("Tickers") or ""
+            items.append({"headline": title, "summary": summary, "impact": row.get("Impact", ""), "related": related})
+        return items
+    return [{"headline": item, "summary": "", "impact": "", "related": ""} for item in section_items(section, limit=10)]
+
+
+def extract_opportunities(report: ParsedReport) -> list[str]:
+    section = find_section(report.raw_sections, ["Highest Conviction Opportunities", "Opportunities", "Tactical Opportunities", "Three-Month Outperformance Setup"])
+    rows = markdown_table_rows(section)
+    if rows:
+        return [" | ".join(f"{key}: {value}" for key, value in row.items() if value) for row in rows[:8]]
+    return section_items(section, limit=8)
+
+
+def extract_risks(report: ParsedReport) -> list[str]:
+    section = find_section(report.raw_sections, ["Volatility and Risk Signals", "Key Risks", "Risk Register", "Contradiction / Audit Flags"])
+    rows = markdown_table_rows(section)
+    if rows:
+        return [" | ".join(f"{key}: {value}" for key, value in row.items() if value) for row in rows[:8]]
+    return section_items(section, limit=8)
+
+
+def extract_signal_changes(report: ParsedReport) -> list[str]:
+    section = find_section(report.raw_sections, ["Signal Changes", "What Changed", "Material Divergences", "Contradiction / Audit Flags", "Leadership Rotation"])
+    return section_items(section, limit=10)
+
+
+def parse_latest_report(markdown: str) -> ParsedReport:
+    raw_sections = parse_markdown_sections(markdown)
+    title_match = re.search(r"^#\s+(.+?)\s*$", markdown, re.MULTILINE)
+    generated_match = re.search(r"Generated at:\s*(.+)", markdown)
+    report = ParsedReport(
+        title=title_match.group(1).strip() if title_match else "Market Intelligence Report",
+        timestamp=generated_match.group(1).strip() if generated_match else None,
+        executive_summary=None,
+        market_snapshot={},
+        positioning={},
+        sector_signals=[],
+        etf_flows={},
+        news=[],
+        opportunities=[],
+        risks=[],
+        signal_changes=[],
+        raw_sections=raw_sections,
+        markdown=markdown,
+    )
+    report.executive_summary = extract_executive_summary(report)
+    report.market_snapshot = extract_market_snapshot(report)
+    report.positioning = extract_positioning(report)
+    report.sector_signals = extract_sector_signals(report)
+    report.etf_flows = extract_etf_flows(report)
+    report.news = extract_news(report)
+    report.opportunities = extract_opportunities(report)
+    report.risks = extract_risks(report)
+    report.signal_changes = extract_signal_changes(report)
+    return report
+
+
+def fetch_latest_report() -> ParsedReport:
+    now = time.monotonic()
+    if REPORT_CACHE["report"] is not None and now < float(REPORT_CACHE["expires_at"]):
+        return REPORT_CACHE["report"]
+    report = parse_latest_report(fetch_report_markdown())
+    REPORT_CACHE["report"] = report
+    REPORT_CACHE["expires_at"] = now + 60
+    return report
+
+
+def html_bullet_lines(lines: list[str], *, limit: int = 6) -> str:
+    return "\n".join(f"• {escape_html(line)}" for line in lines[:limit] if line)
+
+
+def html_table(rows: list[dict[str, str]], columns: list[str], *, limit: int = 8) -> str:
+    selected = rows[:limit]
+    if not selected:
+        return ""
+    widths = {col: min(max(len(col), *(len(str(row.get(col, ""))) for row in selected)), 18) for col in columns}
+    lines = [" ".join(col[: widths[col]].ljust(widths[col]) for col in columns)]
+    for row in selected:
+        lines.append(" ".join(str(row.get(col, ""))[: widths[col]].ljust(widths[col]) for col in columns))
+    return "<pre>" + escape_html("\n".join(lines)) + "</pre>"
+
+
+def report_links_markup() -> dict[str, Any]:
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "Executive Dashboard", "url": settings.dashboard_url},
+                {"text": "Full Report", "url": settings.report_url},
+            ]
+        ]
+    }
+
+
+def report_menu_text() -> str:
+    return "\n".join(
+        [
+            "<b>Available Report Sections</b>",
+            "Executive Summary      /report executive",
+            "Market Snapshot        /report market",
+            "Positioning            /report positioning",
+            "Sector Signals         /report sectors",
+            "ETF Flows              /report etf",
+            "Market News            /report news",
+            "Opportunities          /report opportunities",
+            "Risks                  /report risks",
+            "Signal Changes         /report changes",
+            "Full Report            /report full",
+        ]
+    )
+
+
+def build_report_menu_message(report: ParsedReport) -> TelegramReply:
+    top, bottom = sector_extremes(report.markdown)
+    key_risk = report.risks[0] if report.risks else "Not available in latest report."
+    summary_lines = (report.executive_summary or report_preview(report.markdown, max_lines=5)).splitlines()[:5]
+    text = "\n\n".join(
+        [
+            f"<b>{escape_html(report.title)}</b>",
+            f"<i>{escape_html(report.timestamp or hkt_timestamp())}</i>",
+            html_bullet_lines(summary_lines, limit=5),
+            f"<b>Top buy/overweight sector:</b> {escape_html(top or 'Not available')}",
+            f"<b>Top sell/underweight sector:</b> {escape_html(bottom or 'Not available')}",
+            f"<b>Key risk:</b> {escape_html(key_risk)}",
+            f'<a href="{escape_html(settings.dashboard_url)}">Executive Dashboard</a> | <a href="{escape_html(settings.report_url)}">Full Report</a>',
+            report_menu_text(),
+        ]
+    )
+    return TelegramReply([text], reply_markup=report_links_markup())
+
+
+def build_executive_message(report: ParsedReport) -> TelegramReply:
+    top, bottom = sector_extremes(report.markdown)
+    parts = [
+        "<b>MARKET INTELLIGENCE</b>",
+        "<b>EXECUTIVE SUMMARY</b>",
+        f"<i>{escape_html(report.timestamp or hkt_timestamp())}</i>",
+        html_bullet_lines((report.executive_summary or "").splitlines(), limit=8),
+        f"<b>Top buy/overweight sector:</b> {escape_html(top or 'Not available')}",
+        f"<b>Top sell/underweight sector:</b> {escape_html(bottom or 'Not available')}",
+    ]
+    if report.risks:
+        parts.append(f"<b>Main near-term risk:</b> {escape_html(report.risks[0])}")
+    return TelegramReply(["\n\n".join(part for part in parts if part.strip())], reply_markup=report_links_markup())
+
+
+def build_market_message(report: ParsedReport) -> TelegramReply:
+    rows = report.market_snapshot.get("tables") or []
+    table = html_table(rows, list(rows[0].keys())[:4], limit=12) if rows else ""
+    body = table or "<i>Market snapshot table is not available in the latest report.</i>"
+    return TelegramReply([f"<b>MARKET INTELLIGENCE</b>\n<b>MARKET SNAPSHOT</b>\n<i>{hkt_timestamp()}</i>\n\n{body}"])
+
+
+def build_positioning_message(report: ParsedReport) -> TelegramReply:
+    section = report.positioning.get("section") or "Positioning data is not available in the latest report."
+    return TelegramReply([f"<b>MARKET INTELLIGENCE</b>\n<b>POSITIONING</b>\n<i>{hkt_timestamp()}</i>\n\n{html_bullet_lines(section.splitlines(), limit=12)}"])
+
+
+def build_sector_message(report: ParsedReport) -> TelegramReply:
+    rows = report.sector_signals
+    top, bottom = sector_extremes(report.markdown)
+    table = html_table(rows, list(rows[0].keys())[:4], limit=12) if rows else ""
+    text = f"<b>MARKET INTELLIGENCE</b>\n<b>SECTOR SIGNALS</b>\n<i>{hkt_timestamp()}</i>\n\n"
+    text += f"<b>Top buy/overweight sector:</b> {escape_html(top or 'Not available')}\n"
+    text += f"<b>Top sell/underweight sector:</b> {escape_html(bottom or 'Not available')}\n\n"
+    text += table or "<i>Ranked sector table is not available.</i>"
+    return TelegramReply([text])
+
+
+def build_etf_flow_message(report: ParsedReport) -> TelegramReply:
+    section = report.etf_flows.get("section", "")
+    rows = report.etf_flows.get("tables") or []
+    if not section and not rows:
+        return TelegramReply(["<b>MARKET INTELLIGENCE</b>\n<b>ETF FLOW MONITOR</b>\n\nETF flow data is not available in the latest report."])
+    parts = ["<b>MARKET INTELLIGENCE</b>", "<b>ETF FLOW MONITOR</b>", f"<i>{hkt_timestamp()}</i>"]
+    if rows:
+        parts.append("<b>FLOW TABLE</b>\n" + html_table(rows, list(rows[0].keys())[:4], limit=10))
+    if section:
+        parts.append("<b>KEY IMPLICATIONS</b>\n" + html_bullet_lines(section.splitlines(), limit=10))
+    return TelegramReply(["\n\n".join(parts)])
+
+
+def build_news_message(report: ParsedReport, limit: int = 5) -> TelegramReply:
+    limit = max(1, min(limit, 10))
+    if not report.news:
+        return TelegramReply(["<b>MARKET INTELLIGENCE</b>\n<b>MARKET NEWS &amp; CATALYSTS</b>\n\nNo market-news section was found in the latest report."])
+    lines = ["<b>MARKET INTELLIGENCE</b>", "<b>MARKET NEWS &amp; CATALYSTS</b>", f"<i>{hkt_timestamp()}</i>"]
+    for idx, item in enumerate(report.news[:limit], start=1):
+        lines.append(
+            f"<b>{idx}. {escape_html(item.get('headline', 'Headline'))}</b>\n"
+            f"Summary: {escape_html(item.get('summary') or 'Not specified')}\n"
+            f"Market impact: {escape_html(item.get('impact') or 'Not specified')}\n"
+            f"Related assets: {escape_html(item.get('related') or 'Not specified')}"
+        )
+    return TelegramReply(["\n\n".join(lines)])
+
+
+def build_opportunities_message(report: ParsedReport) -> TelegramReply:
+    body = html_bullet_lines(report.opportunities, limit=8) or "<i>Opportunities section is not available in the latest report.</i>"
+    return TelegramReply([f"<b>MARKET INTELLIGENCE</b>\n<b>OPPORTUNITIES</b>\n<i>{hkt_timestamp()}</i>\n\n{body}"])
+
+
+def build_risks_message(report: ParsedReport) -> TelegramReply:
+    body = html_bullet_lines(report.risks, limit=8) or "<i>Risk section is not available in the latest report.</i>"
+    return TelegramReply([f"<b>MARKET INTELLIGENCE</b>\n<b>RISKS</b>\n<i>{hkt_timestamp()}</i>\n\n{body}"])
+
+
+def build_changes_message(report: ParsedReport) -> TelegramReply:
+    body = html_bullet_lines(report.signal_changes, limit=10) or "<i>No explicit signal-change section was found in the latest report.</i>"
+    return TelegramReply([f"<b>MARKET INTELLIGENCE</b>\n<b>SIGNAL CHANGES</b>\n<i>{hkt_timestamp()}</i>\n\n{body}"])
+
+
+def build_full_report_messages(report: ParsedReport) -> TelegramReply:
+    messages: list[str] = []
+    for key, section in report.raw_sections.items():
+        if section.strip():
+            title = key.title()
+            content = strip_markdown(section)
+            for chunk in split_message(content, limit=3000):
+                messages.append(f"<b>{escape_html(title)}</b>\n<pre>{escape_html(chunk)}</pre>")
+    if not messages:
+        for chunk in split_message(strip_markdown(report.markdown), limit=3000):
+            messages.append(f"<b>{escape_html(report.title)}</b>\n<pre>{escape_html(chunk)}</pre>")
+    total = len(messages)
+    labelled = [f"<b>Full Report - {idx}/{total}</b>\n\n{message}" for idx, message in enumerate(messages, start=1)]
+    labelled[-1] += f'\n\n<a href="{escape_html(settings.dashboard_url)}">Executive Dashboard</a> | <a href="{escape_html(settings.report_url)}">Original Full Report</a>'
+    return TelegramReply(labelled, reply_markup=report_links_markup())
+
+
+def build_report_reply(args: str) -> TelegramReply:
+    parts = args.split()
+    section = parts[0].lower() if parts else ""
+    report = fetch_latest_report()
+    if section in {"", "menu"}:
+        return build_report_menu_message(report)
+    if section == "help":
+        return TelegramReply([report_menu_text()], reply_markup=report_links_markup())
+    if section == "executive":
+        return build_executive_message(report)
+    if section == "market":
+        return build_market_message(report)
+    if section == "positioning":
+        return build_positioning_message(report)
+    if section == "sectors":
+        return build_sector_message(report)
+    if section == "etf":
+        return build_etf_flow_message(report)
+    if section == "news":
+        limit = 5
+        if len(parts) > 1:
+            try:
+                limit = int(parts[1])
+            except ValueError:
+                limit = 5
+        return build_news_message(report, limit=limit)
+    if section == "opportunities":
+        return build_opportunities_message(report)
+    if section == "risks":
+        return build_risks_message(report)
+    if section == "changes":
+        return build_changes_message(report)
+    if section == "full":
+        return build_full_report_messages(report)
+    return TelegramReply(["Unknown report section. Use /report help to view available sections."])
 
 
 def first_non_empty_sections(markdown: str, headings: list[str], *, limit: int = 5) -> list[str]:
@@ -445,7 +882,9 @@ START_TEXT = """Market Intelligence Bot
 Commands:
 /market - Show the latest market snapshot
 /dashboard - Show the latest executive dashboard
-/report - Show the latest full market report
+/report - Browse the latest report by section
+/report etf - ETF flow monitor
+/report news - Market news and catalysts
 /signals - Show latest deterministic setup signals
 /sectors - Show top and bottom sector scores
 /equity AAPL - Look up latest stock data and signals
@@ -461,34 +900,40 @@ def normalize_command(text: str) -> tuple[str, str]:
     return command.lower().split("@")[0], arg_text
 
 
-def command_response(text: str) -> str:
+def command_reply(text: str) -> TelegramReply:
     command, arg_text = normalize_command(text)
     if command == "/start":
-        return START_TEXT.strip()
+        return TelegramReply([f"<pre>{escape_html(START_TEXT.strip())}</pre>"])
     try:
-        markdown = fetch_report_markdown()
         if command == "/market":
-            return market_snapshot_message()
-        if command == "/dashboard":
-            return dashboard_from_report(markdown) or market_snapshot_message()
-        if command == "/report":
-            return strip_markdown(markdown)
-        if command == "/signals":
-            return signals_message(markdown)
-        if command == "/sectors":
-            return sectors_message(markdown)
+            return TelegramReply([f"<pre>{escape_html(market_snapshot_message())}</pre>"])
         if command == "/equity":
-            return equity_message(arg_text)
+            return TelegramReply([f"<pre>{escape_html(equity_message(arg_text))}</pre>"])
         if command == "/macro":
-            return macro_message()
-        if command == "/risk":
-            return risk_message(markdown)
+            return TelegramReply([f"<pre>{escape_html(macro_message())}</pre>"])
         if command == "/status":
-            return status_message()
+            return TelegramReply([f"<pre>{escape_html(status_message())}</pre>"])
+        report = fetch_latest_report()
+        if command == "/dashboard":
+            return build_executive_message(report)
+        if command == "/report":
+            return build_report_reply(arg_text)
+        if command == "/signals":
+            return TelegramReply([f"<pre>{escape_html(signals_message(report.markdown))}</pre>"])
+        if command == "/sectors":
+            return build_sector_message(report)
+        if command == "/risk":
+            return build_risks_message(report)
     except HTTPException as exc:
         logger.warning("Command %s failed safely: %s", command, exc.detail)
-        return f"{command} is temporarily unavailable: {exc.detail}"
-    return "Unknown command. Use /start for available commands."
+        if command in {"/dashboard", "/report", "/signals", "/sectors", "/risk"}:
+            return TelegramReply(["The latest report is temporarily unavailable."])
+        return TelegramReply([f"{escape_html(command)} is temporarily unavailable: {escape_html(exc.detail)}"])
+    return TelegramReply(["Unknown command. Use /start for available commands."])
+
+
+def command_response(text: str) -> str:
+    return "\n\n".join(command_reply(text).messages)
 
 
 def status_message() -> str:
@@ -614,9 +1059,15 @@ async def telegram_webhook(
     if not text or not chat_id:
         return BotResponse(ok=True, handled=False, message="No text command found")
 
-    reply = command_response(text)
+    reply = command_reply(text)
     try:
-        await send_telegram_message(chat_id, reply)
+        for idx, message_text in enumerate(reply.messages):
+            await send_telegram_message(
+                chat_id,
+                message_text,
+                parse_mode=reply.parse_mode,
+                reply_markup=reply.reply_markup if idx == len(reply.messages) - 1 else None,
+            )
     except HTTPException:
         logger.warning("Webhook command handled but Telegram reply delivery failed")
         return BotResponse(ok=True, handled=True, message="Command handled; reply delivery failed")

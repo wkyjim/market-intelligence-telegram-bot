@@ -110,6 +110,124 @@ https://market-intelligence-telegram-bot.onrender.com/telegram/webhook/<TG_WEBHO
 
 Commands addressed to the bot, such as `/start@Ai_market_monitor_bot`, are normalized to `/start`.
 
+## Structured Report Commands
+
+`/report` is a section browser for the latest published markdown report at `TG_REPORT_URL`.
+
+```text
+/report                         Report menu and concise summary
+/report executive               Executive summary
+/report market                  Market snapshot
+/report positioning             Positioning summary
+/report sectors                 Sector signals
+/report etf                     ETF flow monitor
+/report news                    Market news and catalysts, default 5 items
+/report news 10                 Market news and catalysts, maximum 10 items
+/report opportunities           Opportunity summary
+/report risks                   Risk summary
+/report changes                 Signal changes
+/report full                    Full report split into Telegram-safe parts
+/report help                    Report command menu only
+```
+
+Group syntax is supported:
+
+```text
+/report@Ai_market_monitor_bot etf
+/report@Ai_market_monitor_bot news 10
+```
+
+The bot uses Telegram HTML parse mode for report messages. Dynamic report content is escaped before sending.
+
+Example `/report` output:
+
+```text
+Rule-Based Institutional Market Update
+2026-07-21 12:11 HKT
+
+• Regime score: 61 / 100
+• US equity strength: 70 / 100
+
+Top buy/overweight sector: Technology (81)
+Top sell/underweight sector: Utilities (34)
+
+Available Report Sections
+Executive Summary      /report executive
+ETF Flows              /report etf
+Market News            /report news
+```
+
+Example `/report etf` output:
+
+```text
+MARKET INTELLIGENCE
+ETF FLOW MONITOR
+
+FLOW TABLE
+ETF  Flow    Trend
+IVV  1.2bn   Inflow
+HYG  -250mn  Outflow
+
+KEY IMPLICATIONS
+• ETF flows show selective equity demand.
+```
+
+Example `/report news` output:
+
+```text
+MARKET INTELLIGENCE
+MARKET NEWS & CATALYSTS
+
+1. Fed comments drive rates
+Summary: Policy uncertainty remains active
+Market impact: Mixed
+Related assets: Bonds
+```
+
+ETF flow extraction looks for report headings such as:
+
+```text
+ETF Flow
+ETF Flows
+Fund Flow
+Fund Flows
+ETF Fund Flow
+ETF Flow Monitor
+ETF Flows Analysis
+Sector ETF Flow
+Thematic ETF Flow
+Core Flow Signals
+Sector Flow Signals
+Subsector PFV Signals
+```
+
+News extraction looks for report headings such as:
+
+```text
+News
+Market News
+Latest News
+Headlines
+Key Headlines
+Catalysts
+Market Catalysts
+Macro News
+Geopolitics
+Earnings
+Company News
+News Analytics
+Top Market-Moving Headlines
+```
+
+The bot does not invent missing report data. If ETF flow or news sections are absent, it returns a clear fallback message. `/report news` uses content already present in `TG_REPORT_URL`; it does not browse the internet.
+
+To extend heading aliases, update these lists in `main.py`:
+
+```python
+ETF_FLOW_ALIASES
+NEWS_ALIASES
+```
+
 ## Test Task Endpoints in PowerShell
 
 Morning report one-line:
@@ -231,3 +349,18 @@ GitHub Actions:
 ```bash
 pytest
 ```
+
+## Manual Test Checklist
+
+After deploy:
+
+1. Open `https://market-intelligence-telegram-bot.onrender.com/health`.
+2. Register webhook with the same `TG_WEBHOOK_SECRET` in the path and header.
+3. Send `/start` in Telegram.
+4. Send `/report`.
+5. Send `/report etf`.
+6. Send `/report news`.
+7. Send `/report news 10`.
+8. Send `/report full`.
+9. Trigger the morning task endpoint.
+10. Trigger the alert endpoint with a test warning.

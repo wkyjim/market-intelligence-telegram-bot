@@ -10,10 +10,19 @@ import main
 
 SAMPLE_REPORT = """# Rule-Based Institutional Market Update
 
+Generated at: 21 July 2026, 12:11:19 (HKT)
+
 ## Executive Dashboard
 
 - Regime score: **61 / 100**
 - US equity strength: **70 / 100**
+
+## Macro Snapshot
+
+| Asset | Level | Change | Signal |
+|---|---|---|---|
+| S&P 500 | 6400 | 0.5% | Up |
+| VIX | 18 | -2.0% | Calmer |
 
 ## Official Sector Strength
 
@@ -22,6 +31,38 @@ SAMPLE_REPORT = """# Rule-Based Institutional Market Update
 | 1 | Technology | 81 |
 | 2 | Healthcare | 74 |
 | 3 | Utilities | 34 |
+
+## Positioning
+
+- Equities: Selective
+- Credit: Neutral
+- Duration: Hold
+
+## ETF Flow Monitor
+
+| ETF | Flow | Trend |
+|---|---|---|
+| IVV | 1.2bn | Inflow |
+| HYG | -250mn | Outflow |
+
+- ETF flows show selective equity demand.
+- Credit flows are mixed.
+
+## Market News
+
+| Headline | Summary | Market Impact | Related |
+|---|---|---|---|
+| Fed comments drive rates | Policy uncertainty remains active | Mixed | Bonds |
+| AI earnings beat | Large-cap technology sentiment improves | Positive | Technology |
+| Oil supply risk rises | Energy risk premium increases | Mixed | Oil |
+| Retail sales soften | Growth data cools | Negative | Consumer |
+| Gold demand rises | Hedge demand improves | Mixed | Gold |
+| Dollar weakens | FX pressure eases | Positive | EM |
+
+## Highest Conviction Opportunities
+
+- Cybersecurity leadership remains constructive.
+- Healthcare has defensive growth support.
 
 ## Three-Month Outperformance Setup
 
@@ -32,11 +73,17 @@ SAMPLE_REPORT = """# Rule-Based Institutional Market Update
 ## Volatility and Risk Signals
 
 - VIX is elevated.
+
+## Signal Changes
+
+- New ETF flow reversal in high-yield credit.
 """
 
 
 @pytest.fixture()
 def client(tmp_path):
+    main.REPORT_CACHE["expires_at"] = 0.0
+    main.REPORT_CACHE["report"] = None
     main.settings = main.Settings(
         tg_token="token",
         tg_chat_id="123",
@@ -204,3 +251,209 @@ def test_telegram_webhook_recognizes_addressed_start(client, monkeypatch):
     assert response.status_code == 200
     assert response.json()["handled"] is True
     assert "Market Intelligence Bot" in sender.await_args.args[1]
+
+
+def test_report_returns_menu_and_summary(client, monkeypatch):
+    monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
+
+    response = main.command_response("/report")
+
+    assert "Available Report Sections" in response
+    assert "/report etf" in response
+    assert "Top buy/overweight sector" in response
+
+
+def test_report_help_returns_subsection_menu(client, monkeypatch):
+    monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
+
+    response = main.command_response("/report help")
+
+    assert "ETF Flows" in response
+    assert "Market News" in response
+
+
+def test_report_executive_selects_formatter(client, monkeypatch):
+    monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
+
+    response = main.command_response("/report executive")
+
+    assert "EXECUTIVE SUMMARY" in response
+    assert "Top buy/overweight sector" in response
+
+
+def test_report_market_selects_market_formatter(client, monkeypatch):
+    monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
+
+    response = main.command_response("/report market")
+
+    assert "MARKET SNAPSHOT" in response
+    assert "<pre>" in response
+    assert "S&amp;P 500" in response
+
+
+def test_report_positioning_selects_formatter(client, monkeypatch):
+    monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
+
+    response = main.command_response("/report positioning")
+
+    assert "POSITIONING" in response
+    assert "Equities: Selective" in response
+
+
+def test_report_sectors_selects_formatter(client, monkeypatch):
+    monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
+
+    response = main.command_response("/report sectors")
+
+    assert "SECTOR SIGNALS" in response
+    assert "Technology" in response
+
+
+def test_report_etf_selects_etf_flow_formatter(client, monkeypatch):
+    monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
+
+    response = main.command_response("/report etf")
+
+    assert "ETF FLOW MONITOR" in response
+    assert "IVV" in response
+
+
+def test_etf_flow_aliases_are_recognized(client):
+    report = main.parse_latest_report("# Test\n\n## Fund Flows\n\n- SPY inflow\n")
+
+    assert report.etf_flows["section"]
+    assert "SPY inflow" in main.build_etf_flow_message(report).messages[0]
+
+
+def test_missing_etf_data_fallback(client):
+    report = main.parse_latest_report("# Test\n\n## Executive Dashboard\n\n- ok\n")
+
+    response = main.build_etf_flow_message(report).messages[0]
+
+    assert "ETF flow data is not available" in response
+
+
+def test_report_news_defaults_to_five_items(client, monkeypatch):
+    monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
+
+    response = main.command_response("/report news")
+
+    assert "MARKET NEWS" in response
+    assert response.count("<b>") >= 7
+    assert "6. Dollar" not in response
+
+
+def test_report_news_10_returns_at_most_ten(client, monkeypatch):
+    monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
+
+    response = main.command_response("/report news 10")
+
+    assert "6. Dollar" in response
+    assert "11." not in response
+
+
+def test_invalid_news_count_is_handled_safely(client, monkeypatch):
+    monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
+
+    response = main.command_response("/report news many")
+
+    assert "MARKET NEWS" in response
+
+
+def test_news_heading_aliases_are_recognized(client):
+    report = main.parse_latest_report("# Test\n\n## Key Headlines\n\n- CPI data moves rates\n")
+
+    assert report.news[0]["headline"] == "CPI data moves rates"
+
+
+def test_missing_news_data_fallback(client):
+    report = main.parse_latest_report("# Test\n\n## Executive Dashboard\n\n- ok\n")
+
+    response = main.build_news_message(report).messages[0]
+
+    assert "No market-news section was found" in response
+
+
+def test_report_opportunities_works(client, monkeypatch):
+    monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
+
+    response = main.command_response("/report opportunities")
+
+    assert "OPPORTUNITIES" in response
+    assert "Cybersecurity" in response
+
+
+def test_report_risks_works(client, monkeypatch):
+    monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
+
+    response = main.command_response("/report risks")
+
+    assert "RISKS" in response
+    assert "VIX" in response
+
+
+def test_report_changes_works(client, monkeypatch):
+    monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
+
+    response = main.command_response("/report changes")
+
+    assert "SIGNAL CHANGES" in response
+    assert "high-yield" in response
+
+
+def test_report_full_returns_multiple_safe_chunks(client):
+    long_report = "# Test\n\n" + "\n\n".join(f"## Section {idx}\n\n" + ("content\n" * 80) for idx in range(8))
+    report = main.parse_latest_report(long_report)
+
+    reply = main.build_full_report_messages(report)
+
+    assert len(reply.messages) > 1
+    assert all(len(message) <= main.TELEGRAM_LIMIT for message in reply.messages)
+    assert "Full Report - 1/" in reply.messages[0]
+
+
+def test_report_group_command_syntax_is_recognized(client, monkeypatch):
+    monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
+
+    response = main.command_response("/report@Ai_market_monitor_bot etf")
+
+    assert "ETF FLOW MONITOR" in response
+
+
+def test_dynamic_html_is_escaped(client):
+    report = main.parse_latest_report("# Test\n\n## ETF Flow\n\n- <script>alert(1)</script>\n")
+
+    response = main.build_etf_flow_message(report).messages[0]
+
+    assert "&lt;script&gt;" in response
+    assert "<script>" not in response
+
+
+def test_external_report_fetch_failure_produces_user_friendly_reply(client, monkeypatch):
+    def raise_report_failure():
+        raise main.HTTPException(status_code=502, detail="Report service unavailable")
+
+    monkeypatch.setattr(main, "fetch_report_markdown", raise_report_failure)
+
+    response = main.command_response("/report")
+
+    assert response == "The latest report is temporarily unavailable."
+
+
+def test_webhook_returns_200_after_handled_command_error(client, monkeypatch):
+    def raise_report_failure():
+        raise main.HTTPException(status_code=502, detail="Report service unavailable")
+
+    sender = AsyncMock(return_value=1)
+    monkeypatch.setattr(main, "fetch_report_markdown", raise_report_failure)
+    monkeypatch.setattr(main, "send_telegram_message", sender)
+
+    response = client.post(
+        "/telegram/webhook/shared-secret",
+        headers=auth_headers(),
+        json={"message": {"text": "/report", "chat": {"id": "123"}}},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["handled"] is True
+    assert "temporarily unavailable" in sender.await_args.args[1]
