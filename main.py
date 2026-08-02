@@ -529,16 +529,18 @@ def report_menu_text() -> str:
     return "\n".join(
         [
             "<b>Available Report Sections</b>",
-            "Executive Summary      /report executive",
-            "Market Snapshot        /report market",
-            "Positioning            /report positioning",
-            "Sector Signals         /report sectors",
-            "ETF Flows              /report etf",
-            "Market News            /report news",
-            "Opportunities          /report opportunities",
-            "Risks                  /report risks",
-            "Signal Changes         /report changes",
-            "Full Report            /report full",
+            "Executive Summary      /report_executive",
+            "Market Snapshot        /report_market",
+            "Positioning            /report_positioning",
+            "Sector Signals         /report_sectors",
+            "ETF Flows              /report_etf",
+            "Market News            /report_news",
+            "Market News 10         /report_news_10",
+            "Opportunities          /report_opportunities",
+            "Risks                  /report_risks",
+            "Signal Changes         /report_changes",
+            "Full Report            /report_full",
+            "Report Help            /report_help",
         ]
     )
 
@@ -660,41 +662,27 @@ def build_full_report_messages(report: ParsedReport) -> TelegramReply:
     return TelegramReply(labelled, reply_markup=report_links_markup())
 
 
-def build_report_reply(args: str) -> TelegramReply:
-    parts = args.split()
-    section = parts[0].lower() if parts else ""
+REPORT_COMMANDS: dict[str, Any] = {
+    "/report_executive": build_executive_message,
+    "/report_market": build_market_message,
+    "/report_positioning": build_positioning_message,
+    "/report_sectors": build_sector_message,
+    "/report_etf": build_etf_flow_message,
+    "/report_news": lambda report: build_news_message(report, limit=5),
+    "/report_news_10": lambda report: build_news_message(report, limit=10),
+    "/report_opportunities": build_opportunities_message,
+    "/report_risks": build_risks_message,
+    "/report_changes": build_changes_message,
+    "/report_full": build_full_report_messages,
+    "/report_help": lambda report: TelegramReply([report_menu_text()], reply_markup=report_links_markup()),
+}
+
+
+def build_report_reply(args: str = "") -> TelegramReply:
     report = fetch_latest_report()
-    if section in {"", "menu"}:
-        return build_report_menu_message(report)
-    if section == "help":
-        return TelegramReply([report_menu_text()], reply_markup=report_links_markup())
-    if section == "executive":
-        return build_executive_message(report)
-    if section == "market":
-        return build_market_message(report)
-    if section == "positioning":
-        return build_positioning_message(report)
-    if section == "sectors":
-        return build_sector_message(report)
-    if section == "etf":
-        return build_etf_flow_message(report)
-    if section == "news":
-        limit = 5
-        if len(parts) > 1:
-            try:
-                limit = int(parts[1])
-            except ValueError:
-                limit = 5
-        return build_news_message(report, limit=limit)
-    if section == "opportunities":
-        return build_opportunities_message(report)
-    if section == "risks":
-        return build_risks_message(report)
-    if section == "changes":
-        return build_changes_message(report)
-    if section == "full":
-        return build_full_report_messages(report)
-    return TelegramReply(["Unknown report section. Use /report help to view available sections."])
+    if args.strip():
+        return TelegramReply(["Unknown report section. Use /report_help to view available sections."])
+    return build_report_menu_message(report)
 
 
 def first_non_empty_sections(markdown: str, headings: list[str], *, limit: int = 5) -> list[str]:
@@ -824,14 +812,6 @@ def market_snapshot_message() -> str:
     return "\n".join(lines)
 
 
-def macro_message() -> str:
-    symbols = "^GSPC,^NDX,^DJI,^VIX,US2YT=X,US10YT=X,US30YT=X,GC=F,CL=F,BTC-USD"
-    data = fetch_json(f"/macro/batch/latest?symbols={symbols}")
-    lines = ["Latest Macro Summary"]
-    for row in data.get("data", []):
-        lines.append(f"- {row.get('symbol')}: {fmt(row.get('close'))} ({fmt(row.get('pct_chg'), '%')}), {row.get('data_source', 'n/a')}")
-    return "\n".join(lines)
-
 
 def equity_message(ticker: str) -> str:
     ticker = ticker.upper().strip()
@@ -880,17 +860,27 @@ def risk_message(markdown: str) -> str:
 START_TEXT = """Market Intelligence Bot
 
 Commands:
+/start - Show available commands and bot features
 /market - Show the latest market snapshot
-/dashboard - Show the latest executive dashboard
+/dashboard - Open the latest executive dashboard
 /report - Browse the latest report by section
-/report etf - ETF flow monitor
-/report news - Market news and catalysts
-/signals - Show latest deterministic setup signals
-/sectors - Show top and bottom sector scores
-/equity AAPL - Look up latest stock data and signals
-/macro - Show latest macro summary
-/risk - Show current market risk alerts
-/status - Show database, API, and data update status
+/report_executive - Show the executive summary and market regime
+/report_market - Show the cross-asset market snapshot
+/report_positioning - Show current asset and regional positioning
+/report_sectors - Show sector rankings, top buy, and top sell signals
+/report_etf - Show ETF inflows, outflows, and flow implications
+/report_news - Show the five most material market news items and catalysts
+/report_news_10 - Show up to ten market news items and catalysts
+/report_opportunities - Show the highest-conviction investment opportunities
+/report_risks - Show the main market risks and warning signals
+/report_changes - Show recent signal, positioning, flow, and risk changes
+/report_full - Show the complete report in structured messages
+/report_help - Show all available report subsections
+/signals - Show the latest buy and sell signals
+/sectors - Show the top buy sector and top sell sector
+/equity AAPL - Look up the latest data and signals for a stock
+/risk - Show current market and system risk alerts
+/status - Show bot, API, database, report, and data-update status
 """
 
 
@@ -902,15 +892,18 @@ def normalize_command(text: str) -> tuple[str, str]:
 
 def command_reply(text: str) -> TelegramReply:
     command, arg_text = normalize_command(text)
+    report_commands = {"/dashboard", "/report", "/signals", "/sectors", "/risk", *REPORT_COMMANDS.keys()}
     if command == "/start":
         return TelegramReply([f"<pre>{escape_html(START_TEXT.strip())}</pre>"])
+    if command not in {"/market", "/equity", "/status", *report_commands}:
+        return TelegramReply(["Unknown command. Use /start to view available commands."])
     try:
         if command == "/market":
             return TelegramReply([f"<pre>{escape_html(market_snapshot_message())}</pre>"])
         if command == "/equity":
+            if not arg_text.strip():
+                return TelegramReply(["Usage: /equity AAPL"])
             return TelegramReply([f"<pre>{escape_html(equity_message(arg_text))}</pre>"])
-        if command == "/macro":
-            return TelegramReply([f"<pre>{escape_html(macro_message())}</pre>"])
         if command == "/status":
             return TelegramReply([f"<pre>{escape_html(status_message())}</pre>"])
         report = fetch_latest_report()
@@ -918,6 +911,8 @@ def command_reply(text: str) -> TelegramReply:
             return build_executive_message(report)
         if command == "/report":
             return build_report_reply(arg_text)
+        if command in REPORT_COMMANDS:
+            return REPORT_COMMANDS[command](report)
         if command == "/signals":
             return TelegramReply([f"<pre>{escape_html(signals_message(report.markdown))}</pre>"])
         if command == "/sectors":
@@ -926,10 +921,10 @@ def command_reply(text: str) -> TelegramReply:
             return build_risks_message(report)
     except HTTPException as exc:
         logger.warning("Command %s failed safely: %s", command, exc.detail)
-        if command in {"/dashboard", "/report", "/signals", "/sectors", "/risk"}:
+        if command in report_commands:
             return TelegramReply(["The latest report is temporarily unavailable."])
         return TelegramReply([f"{escape_html(command)} is temporarily unavailable: {escape_html(exc.detail)}"])
-    return TelegramReply(["Unknown command. Use /start for available commands."])
+    return TelegramReply(["Unknown command. Use /start to view available commands."])
 
 
 def command_response(text: str) -> str:

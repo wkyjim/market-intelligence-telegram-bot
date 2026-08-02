@@ -253,20 +253,59 @@ def test_telegram_webhook_recognizes_addressed_start(client, monkeypatch):
     assert "Market Intelligence Bot" in sender.await_args.args[1]
 
 
+REQUIRED_COMMANDS = [
+    "/start",
+    "/market",
+    "/dashboard",
+    "/report",
+    "/report_executive",
+    "/report_market",
+    "/report_positioning",
+    "/report_sectors",
+    "/report_etf",
+    "/report_news",
+    "/report_news_10",
+    "/report_opportunities",
+    "/report_risks",
+    "/report_changes",
+    "/report_full",
+    "/report_help",
+    "/signals",
+    "/sectors",
+    "/equity AAPL",
+    "/risk",
+    "/status",
+]
+
+
+def test_start_includes_every_required_command(client):
+    response = main.command_response("/start")
+
+    for command in REQUIRED_COMMANDS:
+        assert command in response
+
+
+def test_start_does_not_include_macro(client):
+    response = main.command_response("/start")
+
+    assert "/macro" not in response
+
+
 def test_report_returns_menu_and_summary(client, monkeypatch):
     monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
 
     response = main.command_response("/report")
 
     assert "Available Report Sections" in response
-    assert "/report etf" in response
+    assert "/report_etf" in response
+    assert "/report_news_10" in response
     assert "Top buy/overweight sector" in response
 
 
 def test_report_help_returns_subsection_menu(client, monkeypatch):
     monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
 
-    response = main.command_response("/report help")
+    response = main.command_response("/report_help")
 
     assert "ETF Flows" in response
     assert "Market News" in response
@@ -275,7 +314,7 @@ def test_report_help_returns_subsection_menu(client, monkeypatch):
 def test_report_executive_selects_formatter(client, monkeypatch):
     monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
 
-    response = main.command_response("/report executive")
+    response = main.command_response("/report_executive")
 
     assert "EXECUTIVE SUMMARY" in response
     assert "Top buy/overweight sector" in response
@@ -284,7 +323,7 @@ def test_report_executive_selects_formatter(client, monkeypatch):
 def test_report_market_selects_market_formatter(client, monkeypatch):
     monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
 
-    response = main.command_response("/report market")
+    response = main.command_response("/report_market")
 
     assert "MARKET SNAPSHOT" in response
     assert "<pre>" in response
@@ -294,7 +333,7 @@ def test_report_market_selects_market_formatter(client, monkeypatch):
 def test_report_positioning_selects_formatter(client, monkeypatch):
     monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
 
-    response = main.command_response("/report positioning")
+    response = main.command_response("/report_positioning")
 
     assert "POSITIONING" in response
     assert "Equities: Selective" in response
@@ -303,7 +342,7 @@ def test_report_positioning_selects_formatter(client, monkeypatch):
 def test_report_sectors_selects_formatter(client, monkeypatch):
     monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
 
-    response = main.command_response("/report sectors")
+    response = main.command_response("/report_sectors")
 
     assert "SECTOR SIGNALS" in response
     assert "Technology" in response
@@ -312,7 +351,7 @@ def test_report_sectors_selects_formatter(client, monkeypatch):
 def test_report_etf_selects_etf_flow_formatter(client, monkeypatch):
     monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
 
-    response = main.command_response("/report etf")
+    response = main.command_response("/report_etf")
 
     assert "ETF FLOW MONITOR" in response
     assert "IVV" in response
@@ -336,7 +375,7 @@ def test_missing_etf_data_fallback(client):
 def test_report_news_defaults_to_five_items(client, monkeypatch):
     monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
 
-    response = main.command_response("/report news")
+    response = main.command_response("/report_news")
 
     assert "MARKET NEWS" in response
     assert response.count("<b>") >= 7
@@ -346,18 +385,18 @@ def test_report_news_defaults_to_five_items(client, monkeypatch):
 def test_report_news_10_returns_at_most_ten(client, monkeypatch):
     monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
 
-    response = main.command_response("/report news 10")
+    response = main.command_response("/report_news_10")
 
     assert "6. Dollar" in response
     assert "11." not in response
 
 
-def test_invalid_news_count_is_handled_safely(client, monkeypatch):
+def test_space_based_news_count_is_not_supported(client, monkeypatch):
     monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
 
-    response = main.command_response("/report news many")
+    response = main.command_response("/report news 10")
 
-    assert "MARKET NEWS" in response
+    assert "Unknown report section" in response
 
 
 def test_news_heading_aliases_are_recognized(client):
@@ -377,7 +416,7 @@ def test_missing_news_data_fallback(client):
 def test_report_opportunities_works(client, monkeypatch):
     monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
 
-    response = main.command_response("/report opportunities")
+    response = main.command_response("/report_opportunities")
 
     assert "OPPORTUNITIES" in response
     assert "Cybersecurity" in response
@@ -386,7 +425,7 @@ def test_report_opportunities_works(client, monkeypatch):
 def test_report_risks_works(client, monkeypatch):
     monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
 
-    response = main.command_response("/report risks")
+    response = main.command_response("/report_risks")
 
     assert "RISKS" in response
     assert "VIX" in response
@@ -395,7 +434,7 @@ def test_report_risks_works(client, monkeypatch):
 def test_report_changes_works(client, monkeypatch):
     monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
 
-    response = main.command_response("/report changes")
+    response = main.command_response("/report_changes")
 
     assert "SIGNAL CHANGES" in response
     assert "high-yield" in response
@@ -415,9 +454,63 @@ def test_report_full_returns_multiple_safe_chunks(client):
 def test_report_group_command_syntax_is_recognized(client, monkeypatch):
     monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
 
-    response = main.command_response("/report@Ai_market_monitor_bot etf")
+    response = main.command_response("/report_etf@Ai_market_monitor_bot")
 
     assert "ETF FLOW MONITOR" in response
+
+
+def test_equity_with_ticker_works(client, monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "fetch_json",
+        lambda path: {
+            "found": True,
+            "data": {
+                "name": "Apple Inc.",
+                "date": "2026-07-10",
+                "close": 200.0,
+                "pct_chg": 1.2,
+                "rsi_14": 55.0,
+                "return_20d": 3.0,
+                "return_60d": 8.0,
+            },
+        },
+    )
+
+    response = main.command_response("/equity AAPL")
+
+    assert "Equity Snapshot: AAPL" in response
+    assert "Apple Inc." in response
+
+
+def test_equity_without_ticker_returns_usage(client):
+    response = main.command_response("/equity")
+
+    assert response == "Usage: /equity AAPL"
+
+
+def test_equity_group_command_suffix_works(client, monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "fetch_json",
+        lambda path: {"found": True, "data": {"name": "Apple Inc.", "close": 200.0}},
+    )
+
+    response = main.command_response("/equity@Ai_market_monitor_bot AAPL")
+
+    assert "Equity Snapshot: AAPL" in response
+
+
+def test_macro_is_unknown_command(client):
+    response = main.command_response("/macro")
+
+    assert response == "Unknown command. Use /start to view available commands."
+
+
+def test_unknown_command_returns_required_fallback(client):
+    response = main.command_response("/unknown")
+
+    assert response == "Unknown command. Use /start to view available commands."
 
 
 def test_dynamic_html_is_escaped(client):

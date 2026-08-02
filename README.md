@@ -100,15 +100,54 @@ https://market-intelligence-telegram-bot.onrender.com/telegram/webhook/<TG_WEBHO
 /market
 /dashboard
 /report
+/report_executive
+/report_market
+/report_positioning
+/report_sectors
+/report_etf
+/report_news
+/report_news_10
+/report_opportunities
+/report_risks
+/report_changes
+/report_full
+/report_help
 /signals
 /sectors
 /equity AAPL
-/macro
 /risk
 /status
 ```
 
-Commands addressed to the bot, such as `/start@Ai_market_monitor_bot`, are normalized to `/start`.
+Commands addressed to the bot, such as `/report_etf@Ai_market_monitor_bot` or `/equity@Ai_market_monitor_bot AAPL`, are normalized by stripping the bot username suffix before matching the command.
+
+## BotFather Command List
+
+Paste this block into BotFather:
+
+```text
+start - Show available commands and bot features
+market - Show the latest market snapshot
+dashboard - Open the latest executive dashboard
+report - Browse the latest report by section
+report_executive - Show the executive summary and market regime
+report_market - Show the cross-asset market snapshot
+report_positioning - Show current asset and regional positioning
+report_sectors - Show sector rankings, top buy, and top sell signals
+report_etf - Show ETF inflows, outflows, and flow implications
+report_news - Show the five most material market news items and catalysts
+report_news_10 - Show up to ten market news items and catalysts
+report_opportunities - Show the highest-conviction investment opportunities
+report_risks - Show the main market risks and warning signals
+report_changes - Show recent signal, positioning, flow, and risk changes
+report_full - Show the complete report in structured messages
+report_help - Show all available report subsections
+signals - Show the latest buy and sell signals
+sectors - Show the top buy sector and top sell sector
+equity - Look up the latest data and signals for a stock
+risk - Show current market and system risk alerts
+status - Show bot, API, database, report, and data-update status
+```
 
 ## Structured Report Commands
 
@@ -116,25 +155,26 @@ Commands addressed to the bot, such as `/start@Ai_market_monitor_bot`, are norma
 
 ```text
 /report                         Report menu and concise summary
-/report executive               Executive summary
-/report market                  Market snapshot
-/report positioning             Positioning summary
-/report sectors                 Sector signals
-/report etf                     ETF flow monitor
-/report news                    Market news and catalysts, default 5 items
-/report news 10                 Market news and catalysts, maximum 10 items
-/report opportunities           Opportunity summary
-/report risks                   Risk summary
-/report changes                 Signal changes
-/report full                    Full report split into Telegram-safe parts
-/report help                    Report command menu only
+/report_executive               Executive summary
+/report_market                  Market snapshot
+/report_positioning             Positioning summary
+/report_sectors                 Sector signals
+/report_etf                     ETF flow monitor
+/report_news                    Market news and catalysts, default 5 items
+/report_news_10                 Market news and catalysts, maximum 10 items
+/report_opportunities           Opportunity summary
+/report_risks                   Risk summary
+/report_changes                 Signal changes
+/report_full                    Full report split into Telegram-safe parts
+/report_help                    Report command menu only
 ```
 
 Group syntax is supported:
 
 ```text
-/report@Ai_market_monitor_bot etf
-/report@Ai_market_monitor_bot news 10
+/report_etf@Ai_market_monitor_bot
+/report_news@Ai_market_monitor_bot
+/equity@Ai_market_monitor_bot AAPL
 ```
 
 The bot uses Telegram HTML parse mode for report messages. Dynamic report content is escaped before sending.
@@ -145,19 +185,19 @@ Example `/report` output:
 Rule-Based Institutional Market Update
 2026-07-21 12:11 HKT
 
-• Regime score: 61 / 100
-• US equity strength: 70 / 100
+? Regime score: 61 / 100
+? US equity strength: 70 / 100
 
 Top buy/overweight sector: Technology (81)
 Top sell/underweight sector: Utilities (34)
 
 Available Report Sections
-Executive Summary      /report executive
-ETF Flows              /report etf
-Market News            /report news
+Executive Summary      /report_executive
+ETF Flows              /report_etf
+Market News            /report_news
 ```
 
-Example `/report etf` output:
+Example `/report_etf` output:
 
 ```text
 MARKET INTELLIGENCE
@@ -169,10 +209,10 @@ IVV  1.2bn   Inflow
 HYG  -250mn  Outflow
 
 KEY IMPLICATIONS
-• ETF flows show selective equity demand.
+? ETF flows show selective equity demand.
 ```
 
-Example `/report news` output:
+Example `/report_news` output:
 
 ```text
 MARKET INTELLIGENCE
@@ -219,7 +259,7 @@ News Analytics
 Top Market-Moving Headlines
 ```
 
-The bot does not invent missing report data. If ETF flow or news sections are absent, it returns a clear fallback message. `/report news` uses content already present in `TG_REPORT_URL`; it does not browse the internet.
+The bot does not invent missing report data. If ETF flow or news sections are absent, it returns a clear fallback message. `/report_news` uses content already present in `TG_REPORT_URL`; it does not browse the internet.
 
 To extend heading aliases, update these lists in `main.py`:
 
@@ -358,9 +398,9 @@ After deploy:
 2. Register webhook with the same `TG_WEBHOOK_SECRET` in the path and header.
 3. Send `/start` in Telegram.
 4. Send `/report`.
-5. Send `/report etf`.
-6. Send `/report news`.
-7. Send `/report news 10`.
-8. Send `/report full`.
+5. Send `/report_etf`.
+6. Send `/report_news`.
+7. Send `/report_news_10`.
+8. Send `/report_full`.
 9. Trigger the morning task endpoint.
 10. Trigger the alert endpoint with a test warning.
