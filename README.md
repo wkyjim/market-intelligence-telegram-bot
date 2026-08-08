@@ -294,6 +294,29 @@ System alert one-line:
 Invoke-RestMethod -Method Post -Uri "https://market-intelligence-telegram-bot.onrender.com/tasks/alert/<TG_WEBHOOK_SECRET>" -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>"; "Content-Type" = "application/json" } -Body '{"message":"Macro data update failed","source":"Macro ingestion","severity":"warning"}'
 ```
 
+## Troubleshooting Scheduled Reports
+
+If the scheduled report workflow fails with:
+
+```text
+env:
+  TG_WEBHOOK_SECRET:
+curl: (22) The requested URL returned error: 404
+{"detail":"Not Found"}
+```
+
+then the GitHub Actions secret is missing or empty. The request path becomes `/tasks/send/morning/`, which does not match the protected FastAPI route.
+
+Fix it in the `wkyjim/market-intelligence-telegram-bot` GitHub repository:
+
+```text
+Settings -> Secrets and variables -> Actions -> New repository secret
+Name: TG_WEBHOOK_SECRET
+Value: same value configured in Render as TG_WEBHOOK_SECRET
+```
+
+Do not print or commit the secret. The workflow now fails before curl with a clear error when this secret is absent.
+
 ## GitHub Actions Scheduling
 
 Workflow:

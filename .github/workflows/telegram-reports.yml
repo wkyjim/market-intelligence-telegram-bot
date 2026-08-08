@@ -37,6 +37,16 @@ jobs:
             echo "report_type=eod" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Validate required secret
+        shell: bash
+        env:
+          TG_WEBHOOK_SECRET: ${{ secrets.TG_WEBHOOK_SECRET }}
+        run: |
+          if [ -z "${TG_WEBHOOK_SECRET:-}" ]; then
+            echo "::error title=Missing GitHub Actions secret::TG_WEBHOOK_SECRET is not configured for this repository. Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
       - name: Send Telegram report
         shell: bash
         env:
