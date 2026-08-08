@@ -294,6 +294,30 @@ System alert one-line:
 Invoke-RestMethod -Method Post -Uri "https://market-intelligence-telegram-bot.onrender.com/tasks/alert/<TG_WEBHOOK_SECRET>" -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>"; "Content-Type" = "application/json" } -Body '{"message":"Macro data update failed","source":"Macro ingestion","severity":"warning"}'
 ```
 
+## Troubleshooting Telegram Delivery
+
+If GitHub Actions reaches Render but fails with:
+
+```text
+{"detail":"Telegram delivery failed: Forbidden: the bot can't send messages to the bot"}
+```
+
+then `TG_CHAT_ID` is wrong. It is likely set to the bot username/id instead of the target user or group chat. Telegram bots cannot send messages to themselves.
+
+Fix in Render environment variables:
+
+```text
+TG_CHAT_ID=<numeric user, group, or channel chat id>
+```
+
+Requirements:
+
+- Start a chat with the bot first, or add the bot to the target group/channel.
+- Use the numeric chat ID, not `TG_USERNAME` and not the bot username.
+- Keep `TG_TOKEN`, `TG_WEBHOOK_SECRET`, and `TG_CHAT_ID` out of Git.
+
+A quick local diagnostic can use Telegram `getMe` and `sendMessage`, but it must never print the token or chat ID.
+
 ## Troubleshooting Scheduled Reports
 
 If the scheduled report workflow fails with:

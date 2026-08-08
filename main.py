@@ -165,6 +165,20 @@ def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
     return chunks
 
 
+def telegram_failure_detail(response: httpx.Response) -> str:
+    description = ""
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    if isinstance(body, dict):
+        description = str(body.get("description") or "").strip()
+    if description:
+        description = re.sub(r"\d{6,}:[A-Za-z0-9_-]+", "[redacted-token]", description)
+        return f"Telegram delivery failed: {description[:300]}"
+    return "Telegram delivery failed"
+
+
 async def send_telegram_message(
     chat_id: str,
     text: str,
@@ -184,13 +198,18 @@ async def send_telegram_message(
                 payload["parse_mode"] = parse_mode
             if reply_markup and sent == 0:
                 payload["reply_markup"] = reply_markup
-            response = await client.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
+            try:
+                response = await client.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
+            except httpx.RequestError as exc:
+                logger.warning("Telegram delivery request failed: %s", exc.__class__.__name__)
+                raise HTTPException(status_code=502, detail="Telegram delivery failed: request error") from exc
             logger.info("Telegram sendMessage status=%s", response.status_code)
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
-                logger.warning("Telegram delivery failed with status=%s", response.status_code)
-                raise HTTPException(status_code=502, detail="Telegram delivery failed") from exc
+                detail = telegram_failure_detail(response)
+                logger.warning("%s", detail)
+                raise HTTPException(status_code=502, detail=detail) from exc
             sent += 1
     return sent
 

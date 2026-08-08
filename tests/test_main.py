@@ -103,6 +103,27 @@ def auth_headers(secret: str = "shared-secret") -> dict[str, str]:
     return {"X-Telegram-Bot-Api-Secret-Token": secret}
 
 
+
+def test_telegram_failure_detail_includes_safe_description(client):
+    response = main.httpx.Response(
+        403,
+        json={"ok": False, "description": "Forbidden: the bot can't send messages to the bot"},
+        request=main.httpx.Request("POST", "https://api.telegram.org/botTOKEN/sendMessage"),
+    )
+
+    assert main.telegram_failure_detail(response) == "Telegram delivery failed: Forbidden: the bot can't send messages to the bot"
+
+
+def test_telegram_failure_detail_redacts_token_like_values(client):
+    response = main.httpx.Response(
+        400,
+        json={"ok": False, "description": "Bad token 123456:ABC_secret"},
+        request=main.httpx.Request("POST", "https://api.telegram.org/botTOKEN/sendMessage"),
+    )
+
+    assert "123456:ABC_secret" not in main.telegram_failure_detail(response)
+    assert "[redacted-token]" in main.telegram_failure_detail(response)
+
 def test_correct_secret_accepted(client, monkeypatch):
     monkeypatch.setattr(main, "fetch_report_markdown", lambda: SAMPLE_REPORT)
     sender = AsyncMock(return_value=1)
