@@ -33,6 +33,8 @@ HKT = ZoneInfo("Asia/Hong_Kong")
 
 logger = logging.getLogger("market_intelligence_telegram_bot")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 @dataclass(frozen=True)
@@ -1068,7 +1070,8 @@ async def telegram_webhook(
     text = str(message.get("text") or "").strip()
     chat = message.get("chat") or {}
     chat_id = str(chat.get("id")) if chat.get("id") is not None else None
-    logger.info("Incoming Telegram command chat_id_present=%s text=%r", bool(chat_id), text)
+    # Temporary diagnostic: remove the numeric chat ID after TG_CHAT_ID is confirmed.
+    logger.info("Incoming Telegram command chat_id=%s text=%r", chat_id, text)
 
     if not text or not chat_id:
         return BotResponse(ok=True, handled=False, message="No text command found")
