@@ -89,7 +89,7 @@ def client(tmp_path):
         tg_chat_id="123",
         tg_username="Ai_market_monitor_bot",
         webhook_secret="shared-secret",
-        render_base_url="https://market-intelligence-telegram-bot.onrender.com",
+        render_base_url="https://bot.example.com",
         market_api_base_url="https://api.example.com",
         report_url="https://reports.example.com/latest.md",
         dashboard_url="https://dashboard.example.com/#overview",
@@ -101,6 +101,16 @@ def client(tmp_path):
 
 def auth_headers(secret: str = "shared-secret") -> dict[str, str]:
     return {"X-Telegram-Bot-Api-Secret-Token": secret}
+
+
+def test_load_settings_uses_environment_service_urls(monkeypatch):
+    monkeypatch.setenv("TG_RENDER_BASE_URL", "https://bot.environment.example/")
+    monkeypatch.setenv("MARKET_API_BASE_URL", "https://api.environment.example/")
+
+    loaded = main.load_settings()
+
+    assert loaded.render_base_url == "https://bot.environment.example"
+    assert loaded.market_api_base_url == "https://api.environment.example"
 
 
 

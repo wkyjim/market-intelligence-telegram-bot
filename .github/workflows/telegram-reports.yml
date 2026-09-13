@@ -19,7 +19,7 @@ on:
           - report-update
 
 env:
-  SERVICE_BASE_URL: https://market-intelligence-telegram-bot.onrender.com
+  TG_RENDER_BASE_URL: ${{ vars.TG_RENDER_BASE_URL }}
 
 jobs:
   send-telegram-report:
@@ -47,6 +47,14 @@ jobs:
             exit 1
           fi
 
+      - name: Validate service URL
+        shell: bash
+        run: |
+          if [ -z "${TG_RENDER_BASE_URL:-}" ]; then
+            echo "::error title=Missing GitHub Actions variable::TG_RENDER_BASE_URL is not configured for this repository. Add it under Settings > Secrets and variables > Actions > Variables."
+            exit 1
+          fi
+
       - name: Send Telegram report
         shell: bash
         env:
@@ -57,4 +65,4 @@ jobs:
             --retry 2 --retry-delay 5 --max-time 120 \
             -X POST \
             -H "X-Telegram-Bot-Api-Secret-Token: ${TG_WEBHOOK_SECRET}" \
-            "${SERVICE_BASE_URL}/tasks/send/${REPORT_TYPE}/${TG_WEBHOOK_SECRET}"
+            "${TG_RENDER_BASE_URL%/}/tasks/send/${REPORT_TYPE}/${TG_WEBHOOK_SECRET}"

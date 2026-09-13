@@ -5,7 +5,7 @@ Standalone FastAPI webhook service for market intelligence Telegram commands, sc
 Production URL:
 
 ```text
-https://market-intelligence-telegram-bot.onrender.com
+https://bot.138.2.69.165.sslip.io
 ```
 
 ## Security Model
@@ -23,17 +23,17 @@ The same secret is required in both places for every protected endpoint:
 
 Do not commit `.env`, Telegram tokens, chat IDs, or shared secrets.
 
-## Required Render Environment Variables
+## Required Service Environment Variables
 
 ```text
 TG_TOKEN=
 TG_CHAT_ID=
 TG_USERNAME=Ai_market_monitor_bot
 TG_WEBHOOK_SECRET=
-TG_RENDER_BASE_URL=https://market-intelligence-telegram-bot.onrender.com
+TG_RENDER_BASE_URL=https://bot.138.2.69.165.sslip.io
 TG_REPORT_URL=https://wkyjim.github.io/market-dashboard/data/latest-report.md
 TG_DASHBOARD_URL=https://wkyjim.github.io/market-dashboard/#overview
-MARKET_API_BASE_URL=https://postgresql-us-equities-api.onrender.com
+MARKET_API_BASE_URL=https://api.138.2.69.165.sslip.io
 REQUEST_TIMEOUT_SECONDS=30
 LOG_LEVEL=INFO
 ```
@@ -53,9 +53,9 @@ Health check:
 curl http://127.0.0.1:8000/health
 ```
 
-## Render Setup
+## Service Setup
 
-Create a Render Web Service from this repository.
+Deploy this repository as the Telegram bot service. The current production deployment runs on Oracle Cloud.
 
 Build command:
 
@@ -69,28 +69,28 @@ Start command:
 uvicorn main:app --host 0.0.0.0 --port $PORT
 ```
 
-Render free-tier warning: the service may cold start. Telegram and scheduled report requests can take longer immediately after idle periods.
+If deployed on a service that sleeps when idle, Telegram and scheduled report requests can take longer during a cold start.
 
 ## Register Telegram Webhook
 
 PowerShell one-line:
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri "https://market-intelligence-telegram-bot.onrender.com/telegram/set-webhook/<TG_WEBHOOK_SECRET>" -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>" }
+Invoke-RestMethod -Method Post -Uri "https://bot.138.2.69.165.sslip.io/telegram/set-webhook/<TG_WEBHOOK_SECRET>" -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>" }
 ```
 
 PowerShell multiline:
 
 ```powershell
 Invoke-RestMethod -Method Post `
-  -Uri "https://market-intelligence-telegram-bot.onrender.com/telegram/set-webhook/<TG_WEBHOOK_SECRET>" `
+  -Uri "https://bot.138.2.69.165.sslip.io/telegram/set-webhook/<TG_WEBHOOK_SECRET>" `
   -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>" }
 ```
 
 Telegram will call:
 
 ```text
-https://market-intelligence-telegram-bot.onrender.com/telegram/webhook/<TG_WEBHOOK_SECRET>
+https://bot.138.2.69.165.sslip.io/telegram/webhook/<TG_WEBHOOK_SECRET>
 ```
 
 ## Telegram Commands
@@ -273,30 +273,30 @@ NEWS_ALIASES
 Morning report one-line:
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri "https://market-intelligence-telegram-bot.onrender.com/tasks/send/morning/<TG_WEBHOOK_SECRET>" -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>" }
+Invoke-RestMethod -Method Post -Uri "https://bot.138.2.69.165.sslip.io/tasks/send/morning/<TG_WEBHOOK_SECRET>" -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>" }
 ```
 
 End-of-day report one-line:
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri "https://market-intelligence-telegram-bot.onrender.com/tasks/send/eod/<TG_WEBHOOK_SECRET>" -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>" }
+Invoke-RestMethod -Method Post -Uri "https://bot.138.2.69.165.sslip.io/tasks/send/eod/<TG_WEBHOOK_SECRET>" -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>" }
 ```
 
 Report update one-line:
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri "https://market-intelligence-telegram-bot.onrender.com/tasks/send/report-update/<TG_WEBHOOK_SECRET>?force=true" -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>" }
+Invoke-RestMethod -Method Post -Uri "https://bot.138.2.69.165.sslip.io/tasks/send/report-update/<TG_WEBHOOK_SECRET>?force=true" -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>" }
 ```
 
 System alert one-line:
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri "https://market-intelligence-telegram-bot.onrender.com/tasks/alert/<TG_WEBHOOK_SECRET>" -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>"; "Content-Type" = "application/json" } -Body '{"message":"Macro data update failed","source":"Macro ingestion","severity":"warning"}'
+Invoke-RestMethod -Method Post -Uri "https://bot.138.2.69.165.sslip.io/tasks/alert/<TG_WEBHOOK_SECRET>" -Headers @{ "X-Telegram-Bot-Api-Secret-Token" = "<TG_WEBHOOK_SECRET>"; "Content-Type" = "application/json" } -Body '{"message":"Macro data update failed","source":"Macro ingestion","severity":"warning"}'
 ```
 
 ## Troubleshooting Telegram Delivery
 
-If GitHub Actions reaches Render but fails with:
+If GitHub Actions reaches the bot service but fails with:
 
 ```text
 {"detail":"Telegram delivery failed: Forbidden: the bot can't send messages to the bot"}
@@ -304,7 +304,7 @@ If GitHub Actions reaches Render but fails with:
 
 then `TG_CHAT_ID` is wrong. It is likely set to the bot username/id instead of the target user or group chat. Telegram bots cannot send messages to themselves.
 
-Fix in Render environment variables:
+Fix in the bot service environment variables:
 
 ```text
 TG_CHAT_ID=<numeric user, group, or channel chat id>
@@ -336,7 +336,7 @@ Fix it in the `wkyjim/market-intelligence-telegram-bot` GitHub repository:
 ```text
 Settings -> Secrets and variables -> Actions -> New repository secret
 Name: TG_WEBHOOK_SECRET
-Value: same value configured in Render as TG_WEBHOOK_SECRET
+Value: the same value configured for the bot service as `TG_WEBHOOK_SECRET`
 ```
 
 Do not print or commit the secret. The workflow now fails before curl with a clear error when this secret is absent.
@@ -354,6 +354,14 @@ GitHub Actions secret required:
 ```text
 TG_WEBHOOK_SECRET
 ```
+
+GitHub Actions repository variable required:
+
+```text
+TG_RENDER_BASE_URL=https://bot.138.2.69.165.sslip.io
+```
+
+Configure it under `Settings > Secrets and variables > Actions > Variables`. The workflow reads the service URL from this variable and fails before delivery if it is missing.
 
 Schedule conversion:
 
@@ -377,18 +385,18 @@ Reusable GitHub Actions step:
 - name: Notify Telegram report update
   env:
     TG_WEBHOOK_SECRET: ${{ secrets.TG_WEBHOOK_SECRET }}
-    SERVICE_BASE_URL: https://market-intelligence-telegram-bot.onrender.com
+    TG_RENDER_BASE_URL: ${{ vars.TG_RENDER_BASE_URL }}
   run: |
     curl --fail-with-body --silent --show-error \
       --retry 2 --retry-delay 5 --max-time 120 \
       -X POST \
       -H "X-Telegram-Bot-Api-Secret-Token: ${TG_WEBHOOK_SECRET}" \
-      "${SERVICE_BASE_URL}/tasks/send/report-update/${TG_WEBHOOK_SECRET}"
+      "${TG_RENDER_BASE_URL%/}/tasks/send/report-update/${TG_WEBHOOK_SECRET}"
 ```
 
 Do not trigger this before the published `TG_REPORT_URL` contains the new report.
 
-Report-update state is stored in a small local JSON file by default. On Render, this filesystem state may reset on redeployment or restart, so the next report-update call may send once again.
+Report-update state is stored in a small local JSON file by default. On an ephemeral container filesystem, this state may reset on redeployment or restart, so the next report-update call may send once again.
 
 ## System-Alert Integration Examples
 
@@ -399,7 +407,8 @@ import os
 import requests
 
 secret = os.environ["TG_WEBHOOK_SECRET"]
-url = f"https://market-intelligence-telegram-bot.onrender.com/tasks/alert/{secret}"
+service_url = os.environ["TG_RENDER_BASE_URL"].rstrip("/")
+url = f"{service_url}/tasks/alert/{secret}"
 
 response = requests.post(
     url,
@@ -420,7 +429,7 @@ GitHub Actions:
 - name: Send Telegram system alert
   env:
     TG_WEBHOOK_SECRET: ${{ secrets.TG_WEBHOOK_SECRET }}
-    SERVICE_BASE_URL: https://market-intelligence-telegram-bot.onrender.com
+    TG_RENDER_BASE_URL: ${{ vars.TG_RENDER_BASE_URL }}
   run: |
     curl --fail-with-body --silent --show-error \
       --retry 2 --retry-delay 5 --max-time 120 \
@@ -428,7 +437,7 @@ GitHub Actions:
       -H "X-Telegram-Bot-Api-Secret-Token: ${TG_WEBHOOK_SECRET}" \
       -H "Content-Type: application/json" \
       --data '{"message":"Macro data update failed","source":"Macro ingestion","severity":"warning"}' \
-      "${SERVICE_BASE_URL}/tasks/alert/${TG_WEBHOOK_SECRET}"
+      "${TG_RENDER_BASE_URL%/}/tasks/alert/${TG_WEBHOOK_SECRET}"
 ```
 
 ## Development Tests
@@ -441,7 +450,7 @@ pytest
 
 After deploy:
 
-1. Open `https://market-intelligence-telegram-bot.onrender.com/health`.
+1. Open `https://bot.138.2.69.165.sslip.io/health`.
 2. Register webhook with the same `TG_WEBHOOK_SECRET` in the path and header.
 3. Send `/start` in Telegram.
 4. Send `/report`.

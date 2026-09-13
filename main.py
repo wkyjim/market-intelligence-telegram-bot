@@ -21,12 +21,20 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
 
-load_dotenv()
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_EXTERNAL_ENV_DIR = (
+    PROJECT_ROOT.parent.parent / "DB_builder_env"
+    if PROJECT_ROOT.parent.name.casefold() == "hermes_pm"
+    else PROJECT_ROOT.parent / "DB_builder_env"
+)
+EXTERNAL_ENV_DIR = Path(
+    os.getenv("DB_BUILDER_ENV_DIR", str(DEFAULT_EXTERNAL_ENV_DIR))
+).expanduser()
+if os.getenv("DB_BUILDER_AUDIT_MODE", "").strip().lower() not in {"1", "true", "yes", "on"}:
+    load_dotenv(EXTERNAL_ENV_DIR / "market-intelligence-telegram-bot" / ".env", override=False)
 
 
 TELEGRAM_LIMIT = 3900
-DEFAULT_MARKET_API_BASE_URL = "https://postgresql-us-equities-api.onrender.com"
-DEFAULT_SERVICE_URL = "https://market-intelligence-telegram-bot.onrender.com"
 DEFAULT_DASHBOARD_URL = "https://wkyjim.github.io/market-dashboard/#overview"
 DEFAULT_REPORT_URL = "https://wkyjim.github.io/market-dashboard/data/latest-report.md"
 HKT = ZoneInfo("Asia/Hong_Kong")
@@ -57,8 +65,8 @@ def load_settings() -> Settings:
         tg_chat_id=os.getenv("TG_CHAT_ID") or os.getenv("TG_chat_id"),
         tg_username=os.getenv("TG_USERNAME") or os.getenv("TG_username"),
         webhook_secret=os.getenv("TG_WEBHOOK_SECRET") or os.getenv("TG_webhook_secret"),
-        render_base_url=(os.getenv("TG_RENDER_BASE_URL") or os.getenv("RENDER_EXTERNAL_URL") or DEFAULT_SERVICE_URL).rstrip("/"),
-        market_api_base_url=os.getenv("MARKET_API_BASE_URL", DEFAULT_MARKET_API_BASE_URL).rstrip("/"),
+        render_base_url=(os.getenv("TG_RENDER_BASE_URL") or os.getenv("RENDER_EXTERNAL_URL") or "").rstrip("/"),
+        market_api_base_url=(os.getenv("MARKET_API_BASE_URL") or "").rstrip("/"),
         report_url=os.getenv("TG_REPORT_URL", DEFAULT_REPORT_URL),
         dashboard_url=os.getenv("TG_DASHBOARD_URL", DEFAULT_DASHBOARD_URL),
         request_timeout_seconds=float(os.getenv("REQUEST_TIMEOUT_SECONDS", "30")),
@@ -204,14 +212,14 @@ async def send_telegram_message(
                 response = await client.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
             except httpx.RequestError as exc:
                 logger.warning("Telegram delivery request failed: %s", exc.__class__.__name__)
-                raise HTTPException(status_code=502, detail="Telegram delivery failed: request error") from exc
+                raise HTTPException(status_code=502, detail="Telegram delivery failed: request error") from None
             logger.info("Telegram sendMessage status=%s", response.status_code)
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
                 detail = telegram_failure_detail(response)
                 logger.warning("%s", detail)
-                raise HTTPException(status_code=502, detail=detail) from exc
+                raise HTTPException(status_code=502, detail=detail) from None
             sent += 1
     return sent
 
@@ -224,7 +232,8 @@ async def send_to_default_chat(text: str, parse_mode: str | None = None) -> int:
 def register_telegram_webhook() -> dict[str, Any]:
     token = require_env(settings.tg_token, "TG_TOKEN")
     secret = require_env(settings.webhook_secret, "TG_WEBHOOK_SECRET")
-    webhook_url = f"{settings.render_base_url}/telegram/webhook/{secret}"
+    service_url = require_env(settings.render_base_url, "TG_RENDER_BASE_URL")
+    webhook_url = f"{service_url}/telegram/webhook/{secret}"
     payload = {
         "url": webhook_url,
         "secret_token": secret,
@@ -238,9 +247,9 @@ def register_telegram_webhook() -> dict[str, Any]:
         )
         logger.info("Telegram setWebhook status=%s", response.status_code)
         response.raise_for_status()
-    except requests.RequestException as exc:
-        logger.exception("Telegram setWebhook failed")
-        raise HTTPException(status_code=502, detail="Telegram webhook registration failed") from exc
+    except requests.RequestException:
+        logger.warning("Telegram setWebhook request failed")
+        raise HTTPException(status_code=502, detail="Telegram webhook registration failed") from None
     return response.json()
 
 
@@ -255,7 +264,8 @@ def fetch_text_url(url: str) -> str:
 
 
 def fetch_json(path: str) -> dict[str, Any]:
-    url = f"{settings.market_api_base_url}{path}"
+    base_url = require_env(settings.market_api_base_url, "MARKET_API_BASE_URL")
+    url = f"{base_url}{path}"
     try:
         response = requests.get(url, timeout=settings.request_timeout_seconds)
         response.raise_for_status()
