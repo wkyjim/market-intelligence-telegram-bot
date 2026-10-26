@@ -581,3 +581,71 @@ def test_webhook_returns_200_after_handled_command_error(client, monkeypatch):
     assert response.status_code == 200
     assert response.json()["handled"] is True
     assert "temporarily unavailable" in sender.await_args.args[1]
+
+
+def test_market_snapshot_uses_api_group_titles_and_bps(monkeypatch):
+    """The bot must render the API's groups, not its own copy of the mapping.
+
+    An earlier version keyed the bps switch off the literal group name
+    "ust_yields", so the moment the API added a second curve group every yield
+    row silently fell back to percent.
+    """
+    payload = {
+        "count": 3,
+        "group_titles": {
+            "equity_indices": "Global Equity Indices",
+            "ust_yields": "UST Yield Curve",
+            "ust_yields_cmt": "UST Yield Curve (Treasury CMT)",
+            "oil": "Oil & Energy",
+        },
+        "groups": {
+            "equity_indices": [
+                {"display_name": "S&P 500", "symbol": "^GSPC", "close": 7612.07,
+                 "pct_chg": 0.42, "change_bps": None, "is_live": True,
+                 "data_source": "live"},
+            ],
+            "ust_yields": [
+                {"display_name": "UST 10Y", "symbol": "US10YT=X", "close": 4.988,
+                 "pct_chg": None, "change_bps": -4.25, "is_live": True,
+                 "data_source": "live"},
+            ],
+            "ust_yields_cmt": [
+                {"display_name": "UST 10Y (CMT)", "symbol": "US10YT_CMT",
+                 "close": 5.0, "pct_chg": 0.1, "change_bps": 0.1,
+                 "is_live": False, "data_source": "close"},
+            ],
+            "oil": [
+                {"display_name": "WTI Crude Future", "symbol": "CL=F", "close": 70.1,
+                 "pct_chg": 1.5, "change_bps": None, "is_live": False,
+                 "data_source": "close"},
+            ],
+        },
+    }
+    monkeypatch.setattr(main, "fetch_json", lambda path: payload)
+    message = main.market_snapshot_message()
+
+    assert "Global Equity Indices" in message
+    assert "UST Yield Curve (Treasury CMT)" in message
+    assert "Oil & Energy" in message
+    # Yields are basis points; equities and oil are percent.
+    assert "(-4.25 bps)" in message
+    assert "(0.42%)" in message
+    assert "(1.50%)" in message
+    # Every row is rendered -- the old version silently capped each group at 8.
+    assert message.count("\n- ") == 4
+    # Live rows are labelled.
+    assert "LIVE" in message
+    assert message.count("LIVE") == 2
+
+
+def test_market_snapshot_falls_back_to_group_name_when_titles_absent(monkeypatch):
+    """An older API without group_titles must still produce readable headings."""
+    payload = {
+        "count": 1,
+        "groups": {"fx_spot": [{"display_name": "EUR/USD", "symbol": "EURUSD=X",
+                                "close": 1.12, "pct_chg": 0.1, "change_bps": None,
+                                "is_live": False, "data_source": "close"}]},
+    }
+    monkeypatch.setattr(main, "fetch_json", lambda path: payload)
+    message = main.market_snapshot_message()
+    assert "Fx Spot" in message

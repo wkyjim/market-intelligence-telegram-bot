@@ -831,15 +831,19 @@ def fmt(value: Any, suffix: str = "") -> str:
 
 def market_snapshot_message() -> str:
     data = fetch_json("/market-tape")
+    groups = data.get("groups", {})
+    titles = {**(data.get("group_titles") or {})}
     lines = ["Latest Market Snapshot"]
-    for group, rows in data.get("groups", {}).items():
+    for group, rows in groups.items():
         if not rows:
             continue
         lines.append("")
-        lines.append(group.replace("_", " ").title())
-        for row in rows[:8]:
-            change = fmt(row.get("change_bps"), " bps") if group == "ust_yields" else fmt(row.get("pct_chg"), "%")
-            lines.append(f"- {row.get('display_name')}: {fmt(row.get('close'))} ({change}), {row.get('data_source', 'n/a')}")
+        lines.append(titles.get(group) or group.replace("_", " ").title())
+        for row in rows:
+            # Yield rows move in basis points; everything else in percent.
+            change = fmt(row.get("change_bps"), " bps") if row.get("change_bps") is not None else fmt(row.get("pct_chg"), "%")
+            live = " LIVE" if row.get("is_live") else ""
+            lines.append(f"- {row.get('display_name')}: {fmt(row.get('close'))} ({change}), {row.get('data_source', 'n/a')}{live}")
     return "\n".join(lines)
 
 
